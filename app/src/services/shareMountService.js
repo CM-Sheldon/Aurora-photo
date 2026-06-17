@@ -5,6 +5,8 @@ const path = require('path');
 
 const execAsync = promisify(exec);
 const MOUNT_BASE = '/media/photo-dedup-mounts';
+const CRED_DIR = '/etc/aurora-shares';          // root-only credential files
+const FSTAB_PATH = process.env.AURORA_FSTAB || '/etc/fstab';
 
 function slugify(str) {
   return str.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase().slice(0, 40);
@@ -14,10 +16,91 @@ function getMountPoint(shareId, host, shareName) {
   return path.join(MOUNT_BASE, `${shareId}_${slugify(host)}_${slugify(shareName)}`);
 }
 
+// Re-use an existing mountpoint for the same host+share so a reconnect re-links
+// to the EXISTING photo index (asset paths already point at this dir) instead of
+// creating a fresh, orphaned mountpoint. The leading id (timestamp) may differ;
+// we match on the stable `_<host>_<share>` suffix.
+function findReusableMountPoint(host, shareName) {
+  const suffix = `_${slugify(host)}_${slugify(shareName)}`;
+  try {
+    if (!fs.existsSync(MOUNT_BASE)) return null;
+    const match = fs.readdirSync(MOUNT_BASE).find(e => e.endsWith(suffix));
+    if (match) return path.join(MOUNT_BASE, match);
+  } catch { /* fall through */ }
+  return null;
+}
+
 function ensureMountBase() {
-  if (!fs.existsSync(MOUNT_BASE)) {
-    fs.mkdirSync(MOUNT_BASE, { recursive: true });
+  if (!fs.existsSync(MOUNT_BASE)) fs.mkdirSync(MOUNT_BASE, { recursive: true });
+}
+
+// ── Reboot persistence: /etc/fstab + root-only credentials file ──────────────
+function credPathFor(mountPoint) {
+  return path.join(CRED_DIR, path.basename(mountPoint) + '.cred');
+}
+
+// Read fstab and drop any line whose mountpoint (2nd field) == target. Reads the
+// real file first (throws → caller aborts rather than risk clobbering). Comments
+// and blank lines are preserved (their 2nd field never equals a mountpoint).
+function fstabWithout(targetMount) {
+  const raw = fs.readFileSync(FSTAB_PATH, 'utf8');
+  return raw.split('\n').filter(line => line.split(/\s+/)[1] !== targetMount);
+}
+
+// Atomic write (tmp + rename) so fstab is never left half-written.
+function writeFstab(lines) {
+  const body = lines.join('\n').replace(/\n+$/, '') + '\n';
+  const tmp = FSTAB_PATH + '.aurora.tmp';
+  fs.writeFileSync(tmp, body, { mode: 0o644 });
+  fs.renameSync(tmp, FSTAB_PATH);
+}
+
+// Persist a successful mount so it returns automatically after a reboot.
+// Safety: only ever manages lines under MOUNT_BASE; every entry gets nofail so a
+// down/missing NAS can never block boot.
+async function persistMount({ source, mountPoint, fstype, credentials = null, readOnly = true, nfsVersion = '4' }) {
+  if (!mountPoint.startsWith(MOUNT_BASE)) return { persisted: false, error: 'refusing: outside mount base' };
+  try {
+    const opts = [readOnly ? 'ro' : 'rw', '_netdev', 'nofail'];
+    if (fstype === 'cifs') {
+      opts.push('uid=0', 'gid=0', 'iocharset=utf8', 'file_mode=0644', 'dir_mode=0755');
+      if (credentials && credentials.username) {
+        fs.mkdirSync(CRED_DIR, { recursive: true, mode: 0o700 });
+        const cp = credPathFor(mountPoint);
+        let body = `username=${credentials.username}\npassword=${credentials.password || ''}\n`;
+        if (credentials.domain) body += `domain=${credentials.domain}\n`;
+        fs.writeFileSync(cp, body, { mode: 0o600 });
+        fs.chmodSync(cp, 0o600);
+        opts.push(`credentials=${cp}`);
+      } else {
+        opts.push('guest');
+      }
+    } else if (fstype === 'nfs') {
+      opts.push(`nfsvers=${nfsVersion}`, 'soft', 'timeo=30', 'retrans=2');
+    } else {
+      return { persisted: false, error: `persistence unsupported for ${fstype}` };
+    }
+
+    const line = `${source} ${mountPoint} ${fstype} ${opts.join(',')} 0 0`;
+    const lines = fstabWithout(mountPoint);
+    lines.push(line);
+    writeFstab(lines);
+    await execAsync('systemctl daemon-reload', { timeout: 10000 }).catch(() => {});
+    return { persisted: true };
+  } catch (err) {
+    return { persisted: false, error: err.message };
   }
+}
+
+// Forget a persisted mount (called on explicit unmount) so it does NOT come back
+// on the next reboot. Removes the fstab line and its credentials file.
+async function unpersistMount(mountPoint) {
+  if (!mountPoint.startsWith(MOUNT_BASE)) return;
+  try {
+    writeFstab(fstabWithout(mountPoint));
+    try { fs.unlinkSync(credPathFor(mountPoint)); } catch { /* none */ }
+    await execAsync('systemctl daemon-reload', { timeout: 10000 }).catch(() => {});
+  } catch { /* best effort */ }
 }
 
 // Check if a path is currently mounted
@@ -41,13 +124,20 @@ async function listActiveMounts() {
 
 // Mount SMB/CIFS share
 async function mountSMB(shareId, host, shareName, options = {}) {
-  const { username = '', password = '', domain = '', readOnly = false } = options;
+  const { username = '', password = '', domain = '', readOnly = true, persist = true } = options;
   ensureMountBase();
 
-  const mountPoint = getMountPoint(shareId, host, shareName);
+  // Re-use the existing mountpoint for this host+share if one exists (re-link).
+  const mountPoint = findReusableMountPoint(host, shareName) || getMountPoint(shareId, host, shareName);
   fs.mkdirSync(mountPoint, { recursive: true });
 
-  if (await isMounted(mountPoint)) return { success: true, mountPoint, alreadyMounted: true };
+  const creds = username ? { username, password, domain } : null;
+
+  if (await isMounted(mountPoint)) {
+    // Already mounted — still (re)write persistence so a reboot keeps it.
+    if (persist) await persistMount({ source: `//${host}/${shareName}`, mountPoint, fstype: 'cifs', readOnly, credentials: creds });
+    return { success: true, mountPoint, alreadyMounted: true };
+  }
 
   const uid = process.getuid ? process.getuid() : 1000;
   const gid = process.getgid ? process.getgid() : 1000;
@@ -67,7 +157,12 @@ async function mountSMB(shareId, host, shareName, options = {}) {
 
   try {
     await execAsync(cmd, { timeout: 20000 });
-    return { success: true, mountPoint };
+    let persisted = false;
+    if (persist) {
+      const p = await persistMount({ source: `//${host}/${shareName}`, mountPoint, fstype: 'cifs', readOnly, credentials: creds });
+      persisted = !!(p && p.persisted);
+    }
+    return { success: true, mountPoint, persisted };
   } catch (err) {
     try { fs.rmdirSync(mountPoint); } catch {}
     const msg = sanitizeMountError(err.message || '');
@@ -83,13 +178,16 @@ async function mountSMB(shareId, host, shareName, options = {}) {
 
 // Mount NFS share
 async function mountNFS(shareId, host, exportPath, options = {}) {
-  const { version = '4', readOnly = false } = options;
+  const { version = '4', readOnly = true, persist = true } = options;
   ensureMountBase();
 
-  const mountPoint = getMountPoint(shareId, host, exportPath);
+  const mountPoint = findReusableMountPoint(host, exportPath) || getMountPoint(shareId, host, exportPath);
   fs.mkdirSync(mountPoint, { recursive: true });
 
-  if (await isMounted(mountPoint)) return { success: true, mountPoint, alreadyMounted: true };
+  if (await isMounted(mountPoint)) {
+    if (persist) await persistMount({ source: `${host}:${exportPath}`, mountPoint, fstype: 'nfs', readOnly, nfsVersion: version });
+    return { success: true, mountPoint, alreadyMounted: true };
+  }
 
   // timeo=30 = 3s, retrans=2 → gives up after ~6s if host unreachable
   let mountOpts = [`nfsvers=${version}`, 'soft', 'timeo=30', 'retrans=2', 'retry=0'];
@@ -99,7 +197,12 @@ async function mountNFS(shareId, host, exportPath, options = {}) {
 
   try {
     await execAsync(cmd, { timeout: 20000 });
-    return { success: true, mountPoint };
+    let persisted = false;
+    if (persist) {
+      const p = await persistMount({ source: `${host}:${exportPath}`, mountPoint, fstype: 'nfs', readOnly, nfsVersion: version });
+      persisted = !!(p && p.persisted);
+    }
+    return { success: true, mountPoint, persisted };
   } catch (err) {
     try { fs.rmdirSync(mountPoint); } catch {}
     const msg = sanitizeMountError(err.message || '');
@@ -118,7 +221,7 @@ async function mountSSHFS(shareId, host, remotePath, options = {}) {
   const { username, port = 22, identityFile, password } = options;
   ensureMountBase();
 
-  const mountPoint = getMountPoint(shareId, host, remotePath);
+  const mountPoint = findReusableMountPoint(host, remotePath) || getMountPoint(shareId, host, remotePath);
   fs.mkdirSync(mountPoint, { recursive: true });
 
   if (await isMounted(mountPoint)) return { success: true, mountPoint, alreadyMounted: true };
@@ -138,13 +241,14 @@ async function mountSSHFS(shareId, host, remotePath, options = {}) {
   }
 }
 
-// Unmount a share
+// Unmount a share (and forget its reboot persistence)
 async function unmountShare(mountPoint) {
   if (!mountPoint.startsWith(MOUNT_BASE)) {
     return { success: false, error: 'Safety check: can only unmount paths under ' + MOUNT_BASE };
   }
   try {
     await execAsync(`sudo umount "${mountPoint}" 2>/dev/null || sudo umount -l "${mountPoint}" 2>/dev/null`, { timeout: 10000 });
+    await unpersistMount(mountPoint);
     try { fs.rmdirSync(mountPoint); } catch {}
     return { success: true };
   } catch (err) {
@@ -181,6 +285,7 @@ function sanitizeMountError(msg) {
 
 module.exports = {
   getMountPoint,
+  findReusableMountPoint,
   isMounted,
   listActiveMounts,
   mountSMB,
@@ -188,5 +293,7 @@ module.exports = {
   mountSSHFS,
   mountShare,
   unmountShare,
+  persistMount,
+  unpersistMount,
   MOUNT_BASE
 };
