@@ -1,0 +1,16 @@
+{
+  "name": "Aurora Photos",
+  "short_name": "Aurora",
+  "description": "Your local photo & video library",
+  "start_url": "/aurora",
+  "scope": "/aurora",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#06060c",
+  "theme_color": "#06060c",
+  "icons": [
+    { "src": "/aurora-icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/aurora-icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/aurora-icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

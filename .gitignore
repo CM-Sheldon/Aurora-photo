@@ -1,0 +1,27 @@
+# Dependencies — installed at deploy time, never committed
+node_modules/
+
+# Runtime data — lives in /var/lib/aurora-photos on the server, never in the repo
+*.db
+*.db-wal
+*.db-shm
+app/database/
+
+# Secrets / local config
+*.passwd
+.env
+.env.*
+*.pem
+id_*
+*_deploy
+
+# Build artifacts (installer / update zips are produced by CI or build script)
+*.zip
+/dist/
+/build/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.log
+*.swp
