@@ -6,6 +6,7 @@ node_modules/
 *.db-wal
 *.db-shm
 app/database/
+app/cache/
 
 # Secrets / local config
 *.passwd
