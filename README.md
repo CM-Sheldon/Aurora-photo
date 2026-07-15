@@ -185,6 +185,41 @@ country around that date. One click tags the whole holiday. The suggestion is
 conservative (same country, one continuous stretch) so it won't sweep in everyday
 photos from home.
 
+## Installing in a container (Proxmox LXC, Docker, etc.)
+
+Aurora runs fine in a container, but mounting **SMB/NFS shares from inside the
+container** needs the container to have the kernel capability to mount
+filesystems. An **unprivileged** container doesn't have that, so any attempt
+from the UI fails with `Operation not permitted` before it ever contacts your
+NAS.
+
+Three ways to make this work — pick the one that fits your setup:
+
+**A. Make the container privileged.** On Proxmox, edit
+`/etc/pve/lxc/<CTID>.conf` on the host and set:
+```
+unprivileged: 0
+features: nesting=1,mount=nfs;cifs
+```
+Restart the container. Aurora can now mount shares from its own UI.
+
+**B. Keep it unprivileged, bind-mount from the host.** Mount the share on the
+Proxmox host itself (via `/etc/fstab`) and expose it into the container:
+```
+# host /etc/fstab
+//nas.local/Photos  /mnt/nas-photos  cifs  credentials=/root/.smbcred,ro,_netdev,nofail  0 0
+
+# host /etc/pve/lxc/<CTID>.conf
+mp0: /mnt/nas-photos,mp=/import/photos,ro=1
+```
+Restart the container, then in Aurora import from **Local folder** → `/import/photos`.
+
+**C. Run Aurora in a full VM** (KVM/QEMU) instead of a container. The guest
+kernel handles its own mounts and there's no capability restriction.
+
+Docker is the same story — mount the share on the host and pass it in with
+`-v /mnt/nas-photos:/import/photos:ro`.
+
 ## Manage it
 
 ```bash

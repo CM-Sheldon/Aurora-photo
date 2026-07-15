@@ -212,7 +212,9 @@ async function mountSMB(shareId, host, shareName, options = {}) {
       : msg.includes('NT_STATUS_ACCESS_DENIED') ? 'Access denied — check share permissions'
       : msg.includes('NT_STATUS_BAD_NETWORK_NAME') || msg.includes('does not exist') ? `Share "${shareName}" not found on ${host}`
       : msg.includes('Operation not permitted') || msg.includes('mount error(1)') ?
-          `SMB negotiation failed (tried v3.1.1, v3.0, v2.1, v1.0). Check that SMB is enabled on ${host}, the account has access to "${shareName}", and run \`dmesg | tail\` on the server for the kernel's reason.`
+          (isUnprivilegedContainer()
+            ? `Aurora is running in an unprivileged container, which can't mount SMB shares (the kernel rejects the mount syscall before it ever talks to ${host}). Either run Aurora in a privileged LXC (Proxmox: set unprivileged=0 and features=mount=nfs;cifs), or mount the share on the host and pass it in as a bind mount, or run Aurora in a full VM. See README → Installing in a container.`
+            : `SMB negotiation failed (tried v3.1.1, v3.0, v2.1, v1.0). Check that SMB is enabled on ${host}, the account has access to "${shareName}", and run \`dmesg | tail\` for the kernel's reason.`)
       : msg.trim() || 'Mount failed — check host, share name, and credentials';
     return { success: false, error: friendly };
   }
@@ -336,6 +338,30 @@ async function mountShare(shareRecord) {
 }
 
 // Strip credentials from error messages
+// True when we're running inside an unprivileged LXC container — the case
+// where `mount -t cifs` returns EPERM before the kernel ever contacts the NAS,
+// because CAP_SYS_ADMIN in the container's user namespace isn't enough for
+// mount syscalls that the host's user namespace doesn't allow. Cached because
+// this is called from the error-path only.
+let _uCtCache = null;
+function isUnprivilegedContainer() {
+  if (_uCtCache !== null) return _uCtCache;
+  try {
+    // /proc/self/status → CapEff bitmask. Container root that can't dmesg
+    // (missing CAP_SYSLOG = bit 34 = 0x400000000) is the tell.
+    const status = fs.readFileSync('/proc/self/status', 'utf8');
+    const m = status.match(/^CapEff:\s*([0-9a-f]+)/mi);
+    if (!m) return (_uCtCache = false);
+    // BigInt because the mask is a 64-bit value.
+    const cap = BigInt('0x' + m[1]);
+    // CAP_SYSLOG = 34; CAP_SYS_ADMIN = 21. If BOTH are missing while we're
+    // otherwise "root", we're in an unprivileged container.
+    const missingSyslog = (cap & (1n << 34n)) === 0n;
+    const missingSysAdmin = (cap & (1n << 21n)) === 0n;
+    return (_uCtCache = missingSyslog || missingSysAdmin);
+  } catch { return (_uCtCache = false); }
+}
+
 function sanitizeMountError(msg) {
   return msg.replace(/password=[^,\s]*/gi, 'password=***')
     .replace(/user=[^,\s]*/gi, 'user=***')
