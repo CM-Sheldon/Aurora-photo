@@ -73,7 +73,7 @@ function writeFstab(lines) {
 // Persist a successful mount so it returns automatically after a reboot.
 // Safety: only ever manages lines under MOUNT_BASE; every entry gets nofail so a
 // down/missing NAS can never block boot.
-async function persistMount({ source, mountPoint, fstype, credentials = null, readOnly = true, nfsVersion = '4', smbVersion = '3.0' }) {
+async function persistMount({ source, mountPoint, fstype, credentials = null, readOnly = true, nfsVersion = '4', smbVersion = '3.1.1' }) {
   if (!mountPoint.startsWith(MOUNT_BASE)) return { persisted: false, error: 'refusing: outside mount base' };
   try {
     const opts = [readOnly ? 'ro' : 'rw', '_netdev', 'nofail'];
@@ -172,11 +172,11 @@ async function mountSMB(shareId, host, shareName, options = {}) {
 
   // SMB protocol version ladder. Modern kernels dropped SMB1 auto-negotiation, so
   // omitting vers= mounts against most real NAS boxes fail with EPERM ("Operation
-  // not permitted"). We try 3.0 first (secure, universally supported by anything
-  // modern), then 2.1 for older Samba/Windows, and only 1.0 as a last resort —
-  // that dialect is deprecated for security so we surface a warning if it's what
-  // finally worked.
-  const versionsToTry = ['3.0', '2.1', '1.0'];
+  // not permitted"). We try 3.1.1 first (what current Synology / QNAP / Windows
+  // Server 2016+ prefer and many enforce as the minimum), then 3.0, then 2.1 for
+  // older Samba/Windows, and finally 1.0 as a last resort — that dialect is
+  // deprecated for security so we surface a warning if it's what finally worked.
+  const versionsToTry = ['3.1.1', '3.0', '2.1', '1.0'];
   let lastErr = null;
   let usedVers = null;
   for (const vers of versionsToTry) {
@@ -212,7 +212,7 @@ async function mountSMB(shareId, host, shareName, options = {}) {
       : msg.includes('NT_STATUS_ACCESS_DENIED') ? 'Access denied — check share permissions'
       : msg.includes('NT_STATUS_BAD_NETWORK_NAME') || msg.includes('does not exist') ? `Share "${shareName}" not found on ${host}`
       : msg.includes('Operation not permitted') || msg.includes('mount error(1)') ?
-          `SMB protocol negotiation failed (tried v3.0, v2.1, v1.0). Check that SMB is enabled on ${host} and that the account has permission to access "${shareName}".`
+          `SMB negotiation failed (tried v3.1.1, v3.0, v2.1, v1.0). Check that SMB is enabled on ${host}, the account has access to "${shareName}", and run \`dmesg | tail\` on the server for the kernel's reason.`
       : msg.trim() || 'Mount failed — check host, share name, and credentials';
     return { success: false, error: friendly };
   }
