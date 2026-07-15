@@ -73,12 +73,14 @@ function writeFstab(lines) {
 // Persist a successful mount so it returns automatically after a reboot.
 // Safety: only ever manages lines under MOUNT_BASE; every entry gets nofail so a
 // down/missing NAS can never block boot.
-async function persistMount({ source, mountPoint, fstype, credentials = null, readOnly = true, nfsVersion = '4' }) {
+async function persistMount({ source, mountPoint, fstype, credentials = null, readOnly = true, nfsVersion = '4', smbVersion = '3.0' }) {
   if (!mountPoint.startsWith(MOUNT_BASE)) return { persisted: false, error: 'refusing: outside mount base' };
   try {
     const opts = [readOnly ? 'ro' : 'rw', '_netdev', 'nofail'];
     if (fstype === 'cifs') {
-      opts.push('uid=0', 'gid=0', 'iocharset=utf8', 'file_mode=0644', 'dir_mode=0755');
+      // Pin the SMB dialect that succeeded interactively so the reboot mount
+      // doesn't fall back to failing auto-negotiation.
+      opts.push(`vers=${smbVersion}`, 'uid=0', 'gid=0', 'iocharset=utf8', 'file_mode=0644', 'dir_mode=0755');
       if (credentials && credentials.username) {
         fs.mkdirSync(CRED_DIR, { recursive: true, mode: 0o700 });
         const cp = credPathFor(mountPoint);
@@ -157,38 +159,80 @@ async function mountSMB(shareId, host, shareName, options = {}) {
   const uid = process.getuid ? process.getuid() : 1000;
   const gid = process.getgid ? process.getgid() : 1000;
 
-  let mountOpts = [`uid=${uid}`, `gid=${gid}`, 'iocharset=utf8', 'file_mode=0644', 'dir_mode=0755'];
-  if (readOnly) mountOpts.push('ro');
+  const baseOpts = [`uid=${uid}`, `gid=${gid}`, 'iocharset=utf8', 'file_mode=0644', 'dir_mode=0755'];
+  if (readOnly) baseOpts.push('ro');
 
   if (username) {
-    mountOpts.push(`username=${username}`);
-    if (password) mountOpts.push(`password=${password}`);
-    if (domain) mountOpts.push(`domain=${domain}`);
+    baseOpts.push(`username=${username}`);
+    if (password) baseOpts.push(`password=${password}`);
+    if (domain) baseOpts.push(`domain=${domain}`);
   } else {
-    mountOpts.push('guest', 'username=guest');
+    baseOpts.push('guest', 'username=guest');
   }
 
-  const cmd = `sudo mount -t cifs "//${host}/${shareName}" "${mountPoint}" -o ${mountOpts.join(',')}`;
-
-  try {
-    await execAsync(cmd, { timeout: 20000 });
-    let persisted = false;
-    if (persist) {
-      const p = await persistMount({ source: `//${host}/${shareName}`, mountPoint, fstype: 'cifs', readOnly, credentials: creds });
-      persisted = !!(p && p.persisted);
+  // SMB protocol version ladder. Modern kernels dropped SMB1 auto-negotiation, so
+  // omitting vers= mounts against most real NAS boxes fail with EPERM ("Operation
+  // not permitted"). We try 3.0 first (secure, universally supported by anything
+  // modern), then 2.1 for older Samba/Windows, and only 1.0 as a last resort —
+  // that dialect is deprecated for security so we surface a warning if it's what
+  // finally worked.
+  const versionsToTry = ['3.0', '2.1', '1.0'];
+  let lastErr = null;
+  let usedVers = null;
+  for (const vers of versionsToTry) {
+    const mountOpts = [...baseOpts, `vers=${vers}`];
+    const cmd = `sudo mount -t cifs "//${host}/${shareName}" "${mountPoint}" -o ${mountOpts.join(',')}`;
+    try {
+      await execAsync(cmd, { timeout: 20000 });
+      usedVers = vers;
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
+      // Only continue the ladder for errors that look like a protocol mismatch.
+      // Bad credentials, missing share, unreachable host etc. won't be fixed by
+      // switching versions — stop early so the user sees the real error.
+      const msg = String(err.message || '');
+      const looksLikeProtocol =
+        msg.includes('Operation not permitted') ||
+        msg.includes('mount error(1)') ||
+        msg.includes('mount error(112)') ||    // Host is down (dialect refused)
+        msg.includes('protocol') ||
+        msg.includes('Protocol not supported');
+      if (!looksLikeProtocol) break;
     }
-    return { success: true, mountPoint, persisted };
-  } catch (err) {
+  }
+
+  if (lastErr) {
     try { fs.rmdirSync(mountPoint); } catch {}
-    const msg = sanitizeMountError(err.message || '');
+    const msg = sanitizeMountError(lastErr.message || '');
     const friendly = msg.includes('Connection refused') ? `Connection refused — is SMB running on ${host}?`
       : msg.includes('No route to host') || msg.includes('Network unreachable') ? `Cannot reach ${host} — check the IP and network`
       : msg.includes('LOGON_FAILURE') || msg.includes('NT_STATUS_LOGON_FAILURE') ? 'Wrong username or password'
       : msg.includes('NT_STATUS_ACCESS_DENIED') ? 'Access denied — check share permissions'
       : msg.includes('NT_STATUS_BAD_NETWORK_NAME') || msg.includes('does not exist') ? `Share "${shareName}" not found on ${host}`
+      : msg.includes('Operation not permitted') || msg.includes('mount error(1)') ?
+          `SMB protocol negotiation failed (tried v3.0, v2.1, v1.0). Check that SMB is enabled on ${host} and that the account has permission to access "${shareName}".`
       : msg.trim() || 'Mount failed — check host, share name, and credentials';
     return { success: false, error: friendly };
   }
+
+  let persisted = false;
+  if (persist) {
+    // Persist with the version that actually worked so a reboot uses the same one.
+    const p = await persistMount({
+      source: `//${host}/${shareName}`, mountPoint, fstype: 'cifs',
+      readOnly, credentials: creds, smbVersion: usedVers,
+    });
+    persisted = !!(p && p.persisted);
+  }
+  return {
+    success: true,
+    mountPoint,
+    persisted,
+    smbVersion: usedVers,
+    warning: usedVers === '1.0' ? 'Mounted using SMB 1.0 (deprecated — consider enabling SMB 2/3 on your NAS)' : undefined,
+  };
 }
 
 // Mount NFS share
