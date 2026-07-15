@@ -1,5 +1,5 @@
 {
   "name": "Aurora Photos",
-  "version": "1.6.3",
-  "build": "2026-07-15-container-hint"
+  "version": "1.6.4",
+  "build": "2026-07-15-sse-chunked"
 }

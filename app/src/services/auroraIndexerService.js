@@ -264,7 +264,7 @@ async function indexFile(filePath, opts = {}) {
 
 // ── Async directory walk that yields to the event loop so the progress
 //    endpoint stays responsive while scanning 100K+ files ──
-async function walkDir(dir, files, counter) {
+async function walkDir(dir, files, counter, session) {
   let entries;
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
   catch (_) { return; }
@@ -272,10 +272,18 @@ async function walkDir(dir, files, counter) {
     if (entry.name.startsWith('.')) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      await walkDir(full, files, counter);
+      await walkDir(full, files, counter, session);
     } else if (entry.isFile()) {
       files.push(full);
-      if (++counter.n % 2000 === 0) await new Promise(r => setImmediate(r));
+      counter.n++;
+      // Live scan counter (visible via SSE) — pretend "scanning" phase reports
+      // scanned so the UI doesn't sit at zero on slow shares. `indexing` phase
+      // overwrites `scanned` with the file total once the walk finishes.
+      if (session) session.scanned = counter.n;
+      if (counter.n % 2000 === 0) {
+        if (session) pushLog(session, `Scanning… ${counter.n.toLocaleString()} files found so far`);
+        await new Promise(r => setImmediate(r));
+      }
     }
   }
 }
@@ -294,10 +302,11 @@ async function processBatch(files, session, concurrency, opts = {}) {
         pushLog(session, `Error: ${path.basename(file)} — ${err.message}`);
       }
       const done = session.indexed + session.skipped + session.errors;
-      if (done % 500 === 0) {
+      if (done % 100 === 0) {
         const pct = Math.round((done / session.scanned) * 100);
         pushLog(session, `${done.toLocaleString()} / ${session.scanned.toLocaleString()} (${pct}%)`);
-        // Durable checkpoint so a crash doesn't lose all progress
+        // Durable checkpoint so a crash doesn't lose all progress. Every 100 (not
+        // 500) so a mid-import Library refresh sees the same numbers as the SSE.
         await db.run(
           'UPDATE import_sessions SET scanned=?, indexed=?, skipped=?, errors=? WHERE id=?',
           [session.scanned, session.indexed, session.skipped, session.errors, session.id]
@@ -333,7 +342,7 @@ async function startImport(sourcePath, sessionId, opts = {}) {
     try {
       pushLog(session, `Scanning ${sourcePath}…`);
       const files = [];
-      await walkDir(sourcePath, files, { n: 0 });
+      await walkDir(sourcePath, files, { n: 0 }, session);
       session.scanned = files.length;
       session.status = 'indexing';
       pushLog(session, `Found ${files.length.toLocaleString()} files. Indexing with ${INDEX_CONCURRENCY} workers…`);

@@ -4272,6 +4272,27 @@
       if (state.importSSE) state.importSSE.close();
       const es = new EventSource(`/api/aurora/import/progress/${sessionId}/stream`);
       state.importSSE = es;
+
+      // Live-append: as photos get indexed, kick a Library refresh in chunks of
+      // ~100 (throttled to at most one refresh every 3s) so the grid fills up
+      // while the import runs instead of staying empty until it's done.
+      let lastIndexedSeen = 0;
+      let lastRefreshAt = 0;
+      let refreshInFlight = false;
+      const maybeLiveRefresh = async (s) => {
+        if (s.status !== 'indexing' && s.status !== 'scanning') return;
+        const grew = (s.indexed || 0) - lastIndexedSeen;
+        const now = Date.now();
+        if (grew < 100) return;
+        if (now - lastRefreshAt < 3000) return;
+        if (refreshInFlight) return;
+        refreshInFlight = true;
+        lastRefreshAt = now;
+        lastIndexedSeen = s.indexed;
+        try { await Promise.all([loadStats(), loadIndex()]); } catch(_) {}
+        finally { refreshInFlight = false; }
+      };
+
       es.onerror = () => {
         // SSE closed (e.g. import complete and server stopped stream) — poll once for final state
         setTimeout(async () => {
@@ -4285,6 +4306,7 @@
       es.onmessage = (e) => {
         let s; try { s = JSON.parse(e.data); } catch(_) { return; }
         updateImportUI(s);
+        maybeLiveRefresh(s);
         if (s.status === 'complete' || s.status === 'error' || s.status === 'interrupted') {
           es.close();
           resetImportBtn();

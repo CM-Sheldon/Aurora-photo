@@ -32,7 +32,15 @@ process.on('unhandledRejection', (r) => console.error('Unhandled rejection:', r 
 const app = express();
 
 // Aurora's asset index is large but mostly numbers — gzip turns ~12MB into ~1MB.
-app.use(compression());
+// Skip Server-Sent Events though: gzip buffers the stream so the client sees
+// nothing until the response closes, which broke the import-progress UI.
+app.use(compression({
+  filter: (req, res) => {
+    const ct = String(res.getHeader('Content-Type') || '');
+    if (ct.startsWith('text/event-stream')) return false;
+    return compression.filter(req, res);
+  },
+}));
 app.set('trust proxy', 1);
 
 // Local app served over HTTP. CSP permits the inline app script/styles, the PWA
