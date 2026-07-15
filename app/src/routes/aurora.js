@@ -10,6 +10,13 @@ const { startImport, getSession, getThumbPath, ensureThumb, videoMimeType,
         startThumbnailWarming, getWarmState, linkLivePhotos, THUMB_DIR } = require('../services/auroraIndexerService');
 const { mountShare, unmountShare, isMounted, listActiveMounts, MOUNT_BASE } = require('../services/shareMountService');
 const geocoder = require('../services/auroraGeocoderService');
+const captioner = require('../services/auroraCaptionService');
+const sharp = require('sharp');   // used to transcode caption images to JPEG (vision LLMs reject webp)
+const { requirePerm } = require('../middleware/auth');
+// NOTE (2026-07-15): the old COCO-SSD "content labels" feature was removed —
+// the natural-language captions (see auroraCaptionService) do the same job with
+// much better recall. All label-related endpoints, filters, and vision service
+// are gone; the DB tables are dropped in initSchema on the next startup.
 
 // RAW stills can't be decoded for preview, so the UI offers a "hide RAW" toggle.
 // These are the RAW extensions the indexer treats as photos (see PHOTO_EXTS).
@@ -53,6 +60,19 @@ function tokenClause(token) {
   // user tags — makes "cyprus holiday" find everything tagged that way
   ors.push(`EXISTS (SELECT 1 FROM asset_tags att JOIN tags tt ON tt.id = att.tag_id WHERE att.asset_id = a.id AND LOWER(tt.name) LIKE ? ESCAPE '\\')`);
   params.push(like);
+  // natural-language captions — matched through the captions_fts FTS5 index rather
+  // than a LIKE scan, so it stays fast as captions grow to 100k+ long descriptions
+  // (an inverted index returns matches in ~ms; `LIKE %tok%` re-scans every caption
+  // row for every token — ~3-4x slower at full scale). FTS matches whole words and
+  // prefixes (tok*), the right model for natural-language search; the fields above
+  // keep substring LIKE for filename-style infix. The subquery is uncorrelated, so
+  // SQLite runs it once per token and probes a.id against the result set. Each token
+  // still ANDs with the rest, so "girl holding coffee" compounds for free.
+  const ftsWords = t.replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+  if (ftsWords.length) {
+    ors.push(`a.id IN (SELECT rowid FROM captions_fts WHERE captions_fts MATCH ?)`);
+    params.push(ftsWords.map(w => w + '*').join(' '));   // prefix-match each sub-word
+  }
 
   // Smart keywords — let people type what they mean.
   if (/^(photo|photos|image|images|pic|pics|picture|pictures|still|stills)$/.test(t)) ors.push(`a.kind = 'photo'`);
@@ -90,6 +110,10 @@ async function getVocab() {
     for (const p of await db.all(`SELECT DISTINCT name, country FROM places`)) { add(p.name); add(p.country); }
     for (const c of await db.all(`SELECT DISTINCT camera FROM assets WHERE camera IS NOT NULL`)) add(c.camera);
     for (const t of await db.all(`SELECT name FROM tags`)) add(t.name);
+    // caption words → fuzzy correction covers natural-language vocabulary ("cofee"→"coffee").
+    // Pulled from the FTS5 term dictionary (captions_vocab) rather than re-tokenising
+    // every caption, so it scales with vocabulary size, not corpus size (cheap at 100k).
+    try { for (const v of await db.all(`SELECT term FROM captions_vocab`)) add(v.term); } catch (_) {}
   } catch (_) {}
   vocabCache = { words: [...words], ts: Date.now() };
   return vocabCache.words;
@@ -135,94 +159,249 @@ async function fuzzyCorrectQuery(q) {
   return changed ? out.join(' ') : null;
 }
 
-// GET /api/aurora/assets?from&to&place&person&kind&fav&q&hideRaw&limit&offset&count
+// Single-lane queue for the /assets facet block. Facets rely on a TEMP TABLE
+// (`search_ids`) that lives on the shared sqlite3 connection, so two concurrent
+// requests would race each other's DROP/CREATE/INSERT and return corrupt data
+// (this manifested as "type two chips fast → empty results" — an intermittent,
+// order-dependent bug that reappeared as soon as the user typed faster than the
+// search took to complete). Real fix: serialise the block. Client-side abort +
+// seq guards prevent the queue from growing without bound.
+let facetLock = Promise.resolve();
+function withFacetLock(fn) {
+  const prev = facetLock;
+  let release;
+  facetLock = new Promise((r) => { release = r; });
+  return prev.then(fn).finally(release);
+}
+
+// Build the filter WHERE clauses for /assets (and its /facets sibling). `exclude`
+// is a Set of dimension names to omit — used by the facet queries so each
+// facet's counts include filters from every OTHER dimension but not its own
+// (otherwise picking "iPhone" collapses every other camera chip to 0, which
+// defeats the point of showing the counts at all).
+function buildAssetFilters(query, exclude = new Set()) {
+  const base = [];
+  const params = [];
+  if (query.from) { base.push('a.taken_at >= ?'); params.push(parseInt(query.from)); }
+  if (query.to)   { base.push('a.taken_at <= ?'); params.push(parseInt(query.to)); }
+  if (query.place && !exclude.has('place')) {
+    const ids = String(query.place).split(',').map(s => parseInt(s, 10)).filter(Number.isFinite);
+    if (ids.length === 1) { base.push('a.place_id = ?'); params.push(ids[0]); }
+    else if (ids.length > 1) { base.push(`a.place_id IN (${ids.map(() => '?').join(',')})`); params.push(...ids); }
+  }
+  if (query.kind    && !exclude.has('kind'))    { base.push('a.kind = ?');    params.push(query.kind); }
+  if (query.camera  && !exclude.has('camera'))  { base.push('a.camera = ?');  params.push(query.camera); }
+  if (query.country && !exclude.has('country')) { base.push('p.country = ?'); params.push(query.country); }
+  if (query.tag && !exclude.has('tag')) {
+    base.push('EXISTS (SELECT 1 FROM asset_tags atf WHERE atf.asset_id = a.id AND atf.tag_id = ?)');
+    params.push(parseInt(query.tag));
+  }
+  if (query.fav === '1' && !exclude.has('fav')) base.push('a.fav = 1');
+  if (query.hideRaw === '1') { const r = rawExclusion('a.path'); base.push(r.sql); params.push(...r.params); }
+  base.push('a.is_live_motion = 0');
+  if (query.showHidden === '1') base.push('a.hidden = 1');
+  else { base.push('a.hidden = 0'); base.push('a.duplicate_of IS NULL'); }
+  return { clauses: base, params };
+}
+
+// GET /api/aurora/assets?from&to&place&person&kind&fav&q&hideRaw&limit&offset&count&facets
 // `place` accepts a single id or a comma-separated list (used by map clusters).
 // `q` is free-text search (see buildSearch). `count=1` also returns the total
 // number of matches (the Search screen uses it to show an accurate result count).
+// `facets=1` also returns per-dimension chip counts so the Search sidebar can
+// reflect the CURRENT result set — see the facet computation at the end.
 router.get('/assets', async (req, res) => {
   try {
-    const { from, to, place, person, kind, fav, q, hideRaw, count, camera, country, tag } = req.query;
+    const { q, count } = req.query;
     const limit = Math.min(2000, Math.max(1, parseInt(req.query.limit) || 200));
     const offset = Math.max(0, parseInt(req.query.offset) || 0);
 
+    // Never trust ?showHidden=1 from a user without the hidden-album permission —
+    // otherwise they'd just tweak the URL to bypass the Hidden album's UI gate.
+    if (req.query.showHidden === '1' && !(req.user && req.user.permissions.includes('photos.hidden'))) {
+      req.query.showHidden = '0';
+    }
+
     // Filters common to both the AND and OR (fuzzy) passes.
-    const base = [];
-    const baseParams = [];
-    if (from) { base.push('a.taken_at >= ?'); baseParams.push(parseInt(from)); }
-    if (to) { base.push('a.taken_at <= ?'); baseParams.push(parseInt(to)); }
-    if (place) {
-      const ids = String(place).split(',').map(s => parseInt(s, 10)).filter(Number.isFinite);
-      if (ids.length === 1) { base.push('a.place_id = ?'); baseParams.push(ids[0]); }
-      else if (ids.length > 1) { base.push(`a.place_id IN (${ids.map(() => '?').join(',')})`); baseParams.push(...ids); }
-    }
-    if (kind) { base.push('a.kind = ?'); baseParams.push(kind); }
-    if (camera) { base.push('a.camera = ?'); baseParams.push(camera); }
-    if (country) { base.push('p.country = ?'); baseParams.push(country); }
-    if (tag) { base.push('EXISTS (SELECT 1 FROM asset_tags atf WHERE atf.asset_id = a.id AND atf.tag_id = ?)'); baseParams.push(parseInt(tag)); }
-    if (fav === '1') { base.push('a.fav = 1'); }
-    if (hideRaw === '1') { const r = rawExclusion('a.path'); base.push(r.sql); baseParams.push(...r.params); }
-    // Live Photo motion clips are surfaced via their still, never as standalone items
-    base.push('a.is_live_motion = 0');
-    // Privacy / duplicates — showHidden=1 flips to the hidden album view
-    if (req.query.showHidden === '1') {
-      base.push('a.hidden = 1');
-    } else {
-      base.push('a.hidden = 0');
-      base.push('a.duplicate_of IS NULL');
-    }
+    const { clauses: base, params: baseParams } = buildAssetFilters(req.query);
 
     const FROM = `FROM assets a LEFT JOIN places p ON a.place_id = p.id`;
     const countMatches = async (clauses, params) =>
       (await db.get(`SELECT COUNT(*) AS c ${FROM} WHERE ${clauses.join(' AND ')}`, params)).c;
 
-    // Pick the best clause for a query string: strict AND first, then OR if AND
-    // matched nothing and there are multiple tokens (so a stray word still hits).
-    async function chooseClause(queryStr) {
-      const and = buildSearch(queryStr, 'and');
-      if (!and.sql) return { sql: '', params: [], fuzzy: false };
-      if (and.tokens > 1 && await countMatches([...base, and.sql], [...baseParams, ...and.params]) === 0) {
-        const or = buildSearch(queryStr, 'or');
-        return { sql: or.sql, params: or.params, fuzzy: true };
-      }
-      return { sql: and.sql, params: and.params, fuzzy: false };
-    }
-
-    let searchSql = '', searchParams = [], fuzzy = false, corrected = null, matchCount = null;
-    const rawQ = q && String(q).trim() ? String(q).trim() : '';
-    if (rawQ) {
-      let c = await chooseClause(rawQ);
-      matchCount = await countMatches([...base, c.sql], [...baseParams, ...c.params]);
-      // Still nothing? Try spelling-correcting the query against the library's
-      // own vocabulary (place/country/camera words) — fixes single-word typos
-      // like "bournmouth" that wildcards alone can't catch.
-      if (matchCount === 0) {
-        const fixed = await fuzzyCorrectQuery(rawQ);
-        if (fixed && fixed.toLowerCase() !== rawQ.toLowerCase()) {
-          const c2 = await chooseClause(fixed);
-          const m2 = await countMatches([...base, c2.sql], [...baseParams, ...c2.params]);
-          if (m2 > 0) { c = c2; matchCount = m2; corrected = fixed; }
-        }
-      }
-      searchSql = c.sql; searchParams = c.params; fuzzy = c.fuzzy || !!corrected;
-    }
-
-    const conditions = searchSql ? [...base, searchSql] : base;
-    const allParams = searchSql ? [...baseParams, ...searchParams] : baseParams;
-
-    const rows = await db.all(
-      `SELECT a.id, a.path, a.kind, a.taken_at, a.width, a.height, a.duration_s,
+    const SELECT_SQL = `SELECT a.id, a.path, a.kind, a.taken_at, a.width, a.height, a.duration_s,
               a.gps_lat, a.gps_lon, a.fav, a.camera, a.live_video_id,
               p.name AS place_name, p.country AS place_country
        ${FROM}
-       WHERE ${conditions.join(' AND ')}
+       WHERE {WHERE}
        ORDER BY CASE WHEN a.taken_at IS NULL THEN 1 ELSE 0 END, a.taken_at DESC
-       LIMIT ? OFFSET ?`,
-      [...allParams, limit, offset]
-    );
+       LIMIT ? OFFSET ?`;
+
+    async function runSelect(clauses, params) {
+      return db.all(SELECT_SQL.replace('{WHERE}', clauses.join(' AND ')), [...params, limit, offset]);
+    }
+
+    let searchSql = '', searchParams = [], fuzzy = false, corrected = null, andTokens = 0;
+    const rawQ = q && String(q).trim() ? String(q).trim() : '';
+    if (rawQ) {
+      const and = buildSearch(rawQ, 'and');
+      searchSql = and.sql; searchParams = and.params; andTokens = and.tokens;
+    }
+
+    let conditions = searchSql ? [...base, searchSql] : base;
+    let allParams = searchSql ? [...baseParams, ...searchParams] : baseParams;
+
+    let rows = await runSelect(conditions, allParams);
+
+    // Fallbacks only make sense on the first page — a later page of a valid query
+    // can legitimately be empty and must NOT be reinterpreted as "no match".
+    // strict=1 (used by the chip query builder) disables them so multiple terms do
+    // an EXACT intersection ("cats AND dogs"), never an OR/typo widening.
+    if (offset === 0 && req.query.strict !== '1') {
+      // Zero results with a multi-token query → try OR (absorbs stray words / typos)
+      if (!rows.length && searchSql && andTokens > 1) {
+        const or = buildSearch(rawQ, 'or');
+        const orConditions = [...base, or.sql];
+        const orParams = [...baseParams, ...or.params];
+        const orRows = await runSelect(orConditions, orParams);
+        if (orRows.length) { rows = orRows; conditions = orConditions; allParams = orParams; fuzzy = true; }
+      }
+
+      // Still nothing → try spelling-correcting the query against the library vocabulary
+      if (!rows.length && rawQ) {
+        const fixed = await fuzzyCorrectQuery(rawQ);
+        if (fixed && fixed.toLowerCase() !== rawQ.toLowerCase()) {
+          const fc = buildSearch(fixed, 'and');
+          const fixedConditions = [...base, fc.sql];
+          const fixedParams = [...baseParams, ...fc.params];
+          const fixedRows = await runSelect(fixedConditions, fixedParams);
+          if (fixedRows.length) { rows = fixedRows; conditions = fixedConditions; allParams = fixedParams; corrected = fixed; fuzzy = false; }
+        }
+      }
+    }
 
     const out = { assets: rows, offset, limit, fuzzy };
     if (corrected) out.corrected = corrected;
-    if (count === '1') out.total = matchCount != null ? matchCount : await countMatches(conditions, allParams);
+    // When facets=1 the facet block below computes total off the temp table
+    // instead — skip this scan so we don't pay for it twice.
+    if (count === '1' && req.query.facets !== '1') out.total = await countMatches(conditions, allParams);
+
+    // ── Facet counts ──────────────────────────────────────────────────────
+    // The Search sidebar chips need to reflect the CURRENT result set — not
+    // the library-wide totals — otherwise a chip like "iPhone X · 16,000"
+    // stays put after the user has narrowed to 30 hits. We compute one
+    // GROUP BY per facet, each excluding its own dimension so the numbers
+    // answer "if I pick THIS value, how many photos would I have?" — the
+    // classic faceted-search UX.
+    //
+    // If the fallback path (OR/fuzzy correction) rewrote the query we use
+    // the FINAL conditions/params — same set the assets grid is showing.
+    // We reconstruct the effective query shape so buildAssetFilters can
+    // honour `exclude`; `q` is folded into every facet via searchSql from
+    // whichever pass produced the result (initial, OR, or fuzzy-corrected).
+    if (req.query.facets === '1') await withFacetLock(async () => {
+      // Perf strategy: the free-text tokenClause is expensive (LIKE across path/
+      // camera/lens/place/country + strftime year + tag/label EXISTS + captions
+      // FTS). Re-scanning it for count + FOUR facet GROUP BYs turns a "lightning
+      // fast" search into a 2-second one. We materialise the id set that matches
+      // all UNIVERSAL filters (everything except the four chip dimensions) into
+      // a TEMP TABLE ONCE, then reuse it for both the count and every facet
+      // aggregate — the chip filters are small and go inline. `out.total` from
+      // the earlier countMatches() would double-scan, so we overwrite it below
+      // with a cheap COUNT off the temp table.
+      //
+      // If the OR / fuzzy fallback fired, `conditions` was rewritten to hold
+      // that pass's text clause; we lift it from there so facets reflect the
+      // same result set the assets grid is showing.
+      const finalSearchSql = conditions.length > base.length ? conditions[conditions.length - 1] : '';
+      const finalSearchParams = allParams.slice(baseParams.length);
+
+      const CHIP_DIMS = new Set(['camera', 'country', 'tag']);
+      const universal = buildAssetFilters(req.query, CHIP_DIMS);
+      const uniClauses = finalSearchSql ? [...universal.clauses, finalSearchSql] : universal.clauses;
+      const uniParams  = finalSearchSql ? [...universal.params,  ...finalSearchParams] : universal.params;
+
+      // Chip clauses (excludes the facet's own dimension). Keep this small &
+      // param-order-preserving — it's assembled per facet.
+      const chipFilterClauses = (excludeDim) => {
+        const c = [], p = [];
+        if (req.query.camera  && excludeDim !== 'camera')  { c.push('a.camera = ?');  p.push(req.query.camera); }
+        if (req.query.country && excludeDim !== 'country') { c.push('p.country = ?'); p.push(req.query.country); }
+        if (req.query.tag && excludeDim !== 'tag') {
+          c.push('EXISTS (SELECT 1 FROM asset_tags atf WHERE atf.asset_id = a.id AND atf.tag_id = ?)');
+          p.push(parseInt(req.query.tag));
+        }
+        return { c, p };
+      };
+
+      // Temp table name is stable per-connection (WAL, single connection in
+      // auroraDbService) but concurrent requests would clash — so DROP first
+      // and use TEMP (private to this connection anyway). Sqlite3 driver
+      // serialises writes on one connection so two overlapping searches will
+      // queue on this DROP/CREATE/INSERT, which is fine for interactive use.
+      await db.run('DROP TABLE IF EXISTS temp.search_ids');
+      await db.run('CREATE TEMP TABLE search_ids (id INTEGER PRIMARY KEY)');
+      await db.run(
+        `INSERT INTO search_ids
+         SELECT a.id FROM assets a LEFT JOIN places p ON a.place_id = p.id
+         WHERE ${uniClauses.join(' AND ')}`,
+        uniParams
+      );
+
+      // If chip filters are active, apply them once to compute total; otherwise
+      // total = row count of search_ids. Overwrites the countMatches() result
+      // above so we don't pay for two full-scan counts (saves ~500ms on q=cat).
+      if (count === '1') {
+        const chipsAll = chipFilterClauses(null);
+        if (!chipsAll.c.length) {
+          out.total = (await db.get('SELECT COUNT(*) AS c FROM search_ids')).c;
+        } else {
+          out.total = (await db.get(
+            `SELECT COUNT(*) AS c FROM search_ids s JOIN assets a ON a.id = s.id
+             LEFT JOIN places p ON a.place_id = p.id
+             WHERE ${chipsAll.c.join(' AND ')}`,
+            chipsAll.p
+          )).c;
+        }
+      }
+
+      const runFacet = (excludeDim, projectSql, groupBy, extraWhere, extraJoin, limit) => {
+        const { c, p } = chipFilterClauses(excludeDim);
+        const where = [...c, ...(extraWhere ? [extraWhere] : [])].join(' AND ') || '1=1';
+        return db.all(
+          `SELECT ${projectSql}, COUNT(*) AS count
+           FROM search_ids s
+           JOIN assets a ON a.id = s.id
+           LEFT JOIN places p ON a.place_id = p.id
+           ${extraJoin || ''}
+           WHERE ${where}
+           GROUP BY ${groupBy}
+           ORDER BY count DESC, ${groupBy} COLLATE NOCASE
+           LIMIT ${limit}`,
+          p
+        );
+      };
+
+      const [cameras, countries, tags] = await Promise.all([
+        runFacet('camera',  'a.camera AS camera', 'a.camera',
+                 "a.camera IS NOT NULL AND a.camera != ''", '', 8),
+        runFacet('country', 'p.country AS country', 'p.country',
+                 "p.country IS NOT NULL AND p.country != ''", '', 12),
+        runFacet('tag',     't.id AS id, t.name AS name', 't.id', null,
+                 'JOIN asset_tags atx ON atx.asset_id = a.id JOIN tags t ON t.id = atx.tag_id', 24),
+      ]);
+
+      // NB: when a facet dimension is active (e.g. camera=iPhone), the search
+      // total already IS its count by construction, so the client just pins
+      // the active chip's count to `total` when it isn't in this top-N slice.
+      out.facets = { cameras, countries, tags };
+
+      // Drop the temp table so a subsequent non-facet query on the same
+      // connection isn't slowed by a leftover 100k-row cache. Runs even if
+      // the facet block threw — the outer try/finally in withFacetLock
+      // guarantees the lock is released regardless.
+      try { await db.run('DROP TABLE IF EXISTS temp.search_ids'); } catch (_) {}
+    });
     res.json(out);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -245,6 +424,9 @@ router.get('/asset/:id', async (req, res) => {
       `SELECT t.id, t.name FROM asset_tags at JOIN tags t ON t.id = at.tag_id
        WHERE at.asset_id = ? ORDER BY t.name`, [req.params.id]
     );
+    // Natural-language caption (read-only, shown in the info panel near tags)
+    const cap = await db.get('SELECT caption, model FROM asset_captions WHERE asset_id = ?', [req.params.id]);
+    row.caption = cap && cap.caption ? cap.caption : null;
     res.json(row);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -336,7 +518,7 @@ const ORIGINAL_TYPES = {
   '.webp': 'image/webp', '.heic': 'image/heic', '.heif': 'image/heif',
   '.tif': 'image/tiff', '.tiff': 'image/tiff', '.bmp': 'image/bmp',
 };
-router.get('/original/:id', async (req, res) => {
+router.get('/original/:id', requirePerm('photos.download'), async (req, res) => {
   try {
     const asset = await db.get('SELECT path, kind FROM assets WHERE id = ?', [req.params.id]);
     if (!asset) return res.status(404).json({ error: 'Not found' });
@@ -358,7 +540,7 @@ router.get('/original/:id', async (req, res) => {
 // This is the download fallback for the Share feature when the Web Share API isn't
 // available (it requires HTTPS/localhost; Aurora is usually served over plain HTTP).
 // Builds the archive from symlinks (zip follows them) so originals are never copied.
-router.get('/share/zip', async (req, res) => {
+router.get('/share/zip', requirePerm('photos.download'), async (req, res) => {
   let staging = null, outZip = null;
   try {
     const ids = String(req.query.ids || '').split(',').map(n => parseInt(n, 10)).filter(Number.isFinite).slice(0, 200);
@@ -404,15 +586,23 @@ router.get('/share/zip', async (req, res) => {
   }
 });
 
-// GET /api/aurora/places
+// GET /api/aurora/places?hideRaw=1
+// hideRaw MUST match the caller's setting: the map pin count has to reflect what
+// GET /assets?place=X&hideRaw=X will actually return, otherwise a RAW-only place
+// reads "N photos" on the pin but its preview grid comes back empty.
 router.get('/places', async (req, res) => {
   try {
+    const extra = req.query.hideRaw === '1' ? rawExclusion('a.path') : { sql: '', params: [] };
     const rows = await db.all(
       `SELECT p.id, p.name, p.country, p.lat, p.lon, COUNT(a.id) AS count,
               MIN(a.taken_at) AS first_date, MAX(a.taken_at) AS last_date
        FROM places p
        JOIN assets a ON a.place_id = p.id AND a.is_live_motion = 0 AND a.hidden = 0 AND a.duplicate_of IS NULL
-       GROUP BY p.id ORDER BY count DESC`
+       ${extra.sql ? 'AND ' + extra.sql : ''}
+       GROUP BY p.id
+       HAVING COUNT(a.id) > 0
+       ORDER BY count DESC`,
+      extra.params
     );
     res.json(rows);
   } catch (err) {
@@ -499,7 +689,7 @@ router.get('/tags', async (req, res) => {
 
 // POST /api/aurora/tags/apply  { name, assetIds:[...] } — create tag if needed,
 // attach it to the given assets. Used for manual tagging (one or many).
-router.post('/tags/apply', async (req, res) => {
+router.post('/tags/apply', requirePerm('photos.tag'), async (req, res) => {
   try {
     const name = String((req.body && req.body.name) || '').trim().slice(0, 80);
     const assetIds = ((req.body && req.body.assetIds) || []).map(n => parseInt(n)).filter(Number.isFinite);
@@ -524,7 +714,7 @@ router.post('/tags/apply', async (req, res) => {
 
 // POST /api/aurora/tags/remove  { tagId, assetIds:[...] } — detach a tag from
 // assets. A tag that ends up on nothing is deleted so the facet list stays clean.
-router.post('/tags/remove', async (req, res) => {
+router.post('/tags/remove', requirePerm('photos.tag'), async (req, res) => {
   try {
     const tagId = parseInt(req.body && req.body.tagId);
     const assetIds = ((req.body && req.body.assetIds) || []).map(n => parseInt(n)).filter(Number.isFinite);
@@ -599,7 +789,7 @@ async function computeSuggestion(tagId, { hideRaw = false, gapDays = 3 } = {}) {
 }
 
 // GET /api/aurora/tags/:tagId/suggest — preview of photos that look like the same trip.
-router.get('/tags/:tagId/suggest', async (req, res) => {
+router.get('/tags/:tagId/suggest', requirePerm('photos.tag'), async (req, res) => {
   try {
     const s = await computeSuggestion(parseInt(req.params.tagId), { hideRaw: req.query.hideRaw === '1' });
     if (!s) return res.json({ total: 0, assets: [], window: null, country: null });
@@ -615,7 +805,7 @@ router.get('/tags/:tagId/suggest', async (req, res) => {
 });
 
 // POST /api/aurora/tags/:tagId/apply-suggestion  { hideRaw? } — tag the whole trip.
-router.post('/tags/:tagId/apply-suggestion', async (req, res) => {
+router.post('/tags/:tagId/apply-suggestion', requirePerm('photos.tag'), async (req, res) => {
   try {
     const tagId = parseInt(req.params.tagId);
     const tag = await db.get('SELECT id, name FROM tags WHERE id = ?', [tagId]);
@@ -634,7 +824,7 @@ router.post('/tags/:tagId/apply-suggestion', async (req, res) => {
 
 // POST /api/aurora/tags/rename  { tagId, name } — rename a tag everywhere. If the
 // new name already exists, the two tags are MERGED (assets moved, old tag removed).
-router.post('/tags/rename', async (req, res) => {
+router.post('/tags/rename', requirePerm('photos.tag'), async (req, res) => {
   try {
     const tagId = parseInt(req.body && req.body.tagId);
     const name = String((req.body && req.body.name) || '').trim().slice(0, 80);
@@ -660,7 +850,7 @@ router.post('/tags/rename', async (req, res) => {
 });
 
 // POST /api/aurora/tags/delete  { tagId } — remove a tag and all its assignments.
-router.post('/tags/delete', async (req, res) => {
+router.post('/tags/delete', requirePerm('photos.tag'), async (req, res) => {
   try {
     const tagId = parseInt(req.body && req.body.tagId);
     if (!Number.isFinite(tagId)) return res.status(400).json({ error: 'tagId required' });
@@ -675,7 +865,7 @@ router.post('/tags/delete', async (req, res) => {
 // POST /api/aurora/tags/bulk  { op:'add'|'remove', name|tagId, assetIds:[...] }
 // Add or remove a tag across many assets at once (multi-select). Chunked + wrapped
 // in a transaction so even a large selection is one fast write.
-router.post('/tags/bulk', async (req, res) => {
+router.post('/tags/bulk', requirePerm('photos.tag'), async (req, res) => {
   try {
     const op = (req.body && req.body.op) || 'add';
     const assetIds = ((req.body && req.body.assetIds) || []).map(n => parseInt(n)).filter(Number.isFinite);
@@ -756,7 +946,7 @@ router.post('/fav/:id', async (req, res) => {
 });
 
 // POST /api/aurora/mount — mount a network share and return its local path
-router.post('/mount', async (req, res) => {
+router.post('/mount', requirePerm('settings.manage'), async (req, res) => {
   const { protocol, host, shareName, username, password, domain, localPath } = req.body;
 
   if (protocol === 'local') {
@@ -804,7 +994,7 @@ router.post('/mount', async (req, res) => {
 });
 
 // GET /api/aurora/mounts — currently-mounted network shares, for the Import screen
-router.get('/mounts', async (req, res) => {
+router.get('/mounts', requirePerm('settings.view'), async (req, res) => {
   try {
     const raw = await listActiveMounts();
     const typeLabel = (fstype) => {
@@ -828,7 +1018,7 @@ router.get('/mounts', async (req, res) => {
 });
 
 // POST /api/aurora/unmount { mountPoint }
-router.post('/unmount', async (req, res) => {
+router.post('/unmount', requirePerm('settings.manage'), async (req, res) => {
   const { mountPoint } = req.body;
   if (!mountPoint) return res.status(400).json({ error: 'mountPoint required' });
   if (!mountPoint.startsWith(MOUNT_BASE)) {
@@ -844,7 +1034,7 @@ router.post('/unmount', async (req, res) => {
 });
 
 // GET /api/aurora/settings/metrics — DB / thumbnail / error stats for the Settings page
-router.get('/settings/metrics', async (req, res) => {
+router.get('/settings/metrics', requirePerm('settings.view'), async (req, res) => {
   try {
     const lib = await db.get(
       `SELECT COUNT(*) AS total,
@@ -901,7 +1091,7 @@ router.get('/settings/metrics', async (req, res) => {
 });
 
 // POST /api/aurora/settings/relink-live — re-pair Live Photos (idempotent)
-router.post('/settings/relink-live', async (req, res) => {
+router.post('/settings/relink-live', requirePerm('settings.manage'), async (req, res) => {
   try {
     res.json(await linkLivePhotos());
   } catch (err) {
@@ -913,7 +1103,7 @@ router.post('/settings/relink-live', async (req, res) => {
 // (Re-)resolve place names from the offline cities dataset. By default only fills
 // places that have no name yet (e.g. imported before cities.tsv was present);
 // pass all=true to re-resolve every place. Idempotent and safe to re-run.
-router.post('/settings/geocode-places', async (req, res) => {
+router.post('/settings/geocode-places', requirePerm('settings.manage'), async (req, res) => {
   try {
     const all = !!(req.body && req.body.all);
     await geocoder.reload(); // pick up a cities.tsv added since startup
@@ -936,21 +1126,155 @@ router.post('/settings/geocode-places', async (req, res) => {
 });
 
 // POST /api/aurora/warm — start background thumbnail warming
-router.post('/warm', (req, res) => {
+router.post('/warm', requirePerm('settings.manage'), (req, res) => {
   const state = startThumbnailWarming();
   res.json(state);
 });
 
 // GET /api/aurora/warm/status
-router.get('/warm/status', (req, res) => {
+router.get('/warm/status', requirePerm('settings.view'), (req, res) => {
   res.json(getWarmState());
+});
+
+// ── Natural-language captions seam (for the networked vision-LLM worker) ──────
+// A small loop on the M4 Mac mini pulls un-captioned photos, asks Ollama for a
+// short factual description, and posts it back. All ML runs on the Mac — this box
+// only stores/searches text. Resumable: the captioned_at cursor is server-side, so
+// the worker holds no state and can stop/restart anytime.
+
+// GET /api/aurora/captions/pending?limit= — visible photos with no caption yet,
+// each with a light image URL (2048px webp thumb — far smaller than the original).
+router.get('/captions/pending', async (req, res) => {
+  try {
+    const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit) || 50));
+    const rows = await db.all(
+      `SELECT a.id FROM assets a
+       WHERE a.captioned_at IS NULL AND a.kind='photo' AND a.is_live_motion=0
+         AND a.hidden=0 AND a.duplicate_of IS NULL
+       ORDER BY a.id LIMIT ?`,
+      [limit]
+    );
+    res.json({ assets: rows.map(r => ({ id: r.id, image: `/api/aurora/captions/image/${r.id}` })) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/aurora/captions/image/:id — the photo as a JPEG (model-friendly).
+// Vision-LLM image loaders typically reject webp, so the caption worker fetches the
+// image here rather than /thumb (which serves webp for the browser). We reuse the
+// cached 2048px thumb — generating it once if missing — and transcode to JPEG on the
+// fly. That's one cheap conversion per photo over the captioning run, and it keeps the
+// browsing thumb cache webp-only (no disturbance to the thumb hot path or cache-epoch).
+router.get('/captions/image/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    let webp = getThumbPath(id, 'full');
+    if (!fs.existsSync(webp)) {
+      const asset = await db.get('SELECT path, kind FROM assets WHERE id = ?', [id]);
+      if (!asset) return res.status(404).json({ error: 'Not found' });
+      webp = await ensureThumb(id, asset.path, asset.kind, 'full');
+    }
+    if (!webp || !fs.existsSync(webp)) return res.status(404).json({ error: 'Image not available' });
+    const jpeg = await sharp(webp).jpeg({ quality: 82 }).toBuffer();
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(jpeg);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/aurora/captions/ingest { assetId, caption, model }
+// Upserts the caption, keeps captions_fts in sync, and advances the captioned_at
+// cursor (all via captioner.saveCaption — the single source of truth shared with the
+// in-app caption service). Mirrors /labels/ingest. An external worker only calls this
+// on success, so a skipped (errored) photo keeps captioned_at NULL and is retried.
+router.post('/captions/ingest', async (req, res) => {
+  try {
+    const assetId = parseInt(req.body && req.body.assetId);
+    const caption = (req.body && req.body.caption != null)
+      ? String(req.body.caption).replace(/\s+/g, ' ').trim().slice(0, 2000) : '';
+    const model = (req.body && req.body.model) ? String(req.body.model).slice(0, 60) : null;
+    if (!Number.isFinite(assetId)) return res.status(400).json({ error: 'assetId required' });
+    const asset = await db.get('SELECT id FROM assets WHERE id = ?', [assetId]);
+    if (!asset) return res.status(404).json({ error: 'Unknown assetId' });
+    await captioner.saveCaption(assetId, caption, model);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Caption service control (the Settings → Manage panel drives these) ────────
+// The captioning loop runs IN this app (it does no ML — it just calls the Ollama
+// server — so it's light enough for this box) and is started/stopped from the UI.
+
+// GET /api/aurora/captions/status → live runtime state + cumulative counts.
+router.get('/captions/status', async (req, res) => {
+  try {
+    const VISIBLE = `kind='photo' AND is_live_motion=0 AND hidden=0 AND duplicate_of IS NULL`;
+    const total = (await db.get(`SELECT COUNT(*) AS c FROM assets WHERE ${VISIBLE}`)).c;
+    const captioned = (await db.get(`SELECT COUNT(*) AS c FROM assets WHERE captioned_at IS NOT NULL AND ${VISIBLE}`)).c;
+    const s = captioner.getCaptionState();
+    res.json({
+      running: s.running, phase: s.phase, done: s.done, skipped: s.skipped, error: s.error,
+      model: s.model, last: s.last, log: s.log, captioned, total,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/aurora/captions/start — begin captioning with the saved config.
+router.post('/captions/start', requirePerm('settings.manage'), (req, res) => {
+  const s = captioner.startCaptioning();
+  res.json({ running: s.running, phase: s.phase });
+});
+
+// POST /api/aurora/captions/stop — stop after the in-flight images (resumable).
+router.post('/captions/stop', requirePerm('settings.manage'), (req, res) => {
+  const s = captioner.stopCaptioning();
+  res.json({ running: s.running, phase: s.phase });
+});
+
+// GET /api/aurora/captions/config — saved Ollama URL / model / style / concurrency
+// plus the list of available caption styles for the UI dropdown.
+router.get('/captions/config', requirePerm('settings.view'), async (req, res) => {
+  try {
+    const cfg = await captioner.getConfig();
+    res.json({ ...cfg, styles: captioner.getStyles() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/aurora/captions/config { url, model, style, concurrency } — persist config.
+router.post('/captions/config', requirePerm('settings.manage'), async (req, res) => {
+  try {
+    const cfg = await captioner.setConfig(req.body || {});
+    res.json({ ...cfg, styles: captioner.getStyles() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/aurora/captions/models?url= — probe an Ollama server (defaults to the saved
+// URL) and return its models, flagging vision-capable ones. Powers Test + the dropdown.
+router.get('/captions/models', requirePerm('settings.view'), async (req, res) => {
+  try {
+    const url = req.query.url || (await captioner.getConfig()).url;
+    res.json({ url, ...(await captioner.listModels(url)) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // POST /api/aurora/import
 // `force: true` re-reads metadata for files already indexed (used by the Settings
 // "Re-index metadata" action so the improved date extraction is applied to an
 // existing library). Requires the source share to be mounted.
-router.post('/import', async (req, res) => {
+router.post('/import', requirePerm('settings.manage'), async (req, res) => {
   const { sourcePath, force } = req.body;
   if (!sourcePath) return res.status(400).json({ error: 'sourcePath required' });
   if (!fs.existsSync(sourcePath)) return res.status(400).json({ error: 'Path does not exist' });
@@ -1023,15 +1347,14 @@ router.get('/albums', async (req, res) => {
        LIMIT 48`
     );
 
-    res.json({
-      smart: [
-        { id: 'favorites', name: 'Favorites', icon: 'heart', count: favorites.count, query: { fav: '1' } },
-        { id: 'videos', name: 'Videos', icon: 'film', count: videos.count, query: { kind: 'video' } },
-        { id: 'recent', name: 'Recent 30 days', icon: 'clock', count: recent.count, query: { from: Date.now() - 30 * 24 * 3600 * 1000 } },
-        { id: 'hidden', name: 'Hidden', icon: 'lock', count: hidden.count, query: { showHidden: '1' } },
-      ],
-      events
-    });
+    const canSeeHidden = !!(req.user && req.user.permissions.includes('photos.hidden'));
+    const smart = [
+      { id: 'favorites', name: 'Favorites', icon: 'heart', count: favorites.count, query: { fav: '1' } },
+      { id: 'videos', name: 'Videos', icon: 'film', count: videos.count, query: { kind: 'video' } },
+      { id: 'recent', name: 'Recent 30 days', icon: 'clock', count: recent.count, query: { from: Date.now() - 30 * 24 * 3600 * 1000 } },
+    ];
+    if (canSeeHidden) smart.push({ id: 'hidden', name: 'Hidden', icon: 'lock', count: hidden.count, query: { showHidden: '1' } });
+    res.json({ smart, events });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1061,12 +1384,12 @@ function readUpdateStatus() {
 }
 
 // GET /api/aurora/settings/update/status
-router.get('/settings/update/status', (req, res) => {
+router.get('/settings/update/status', requirePerm('settings.view'), (req, res) => {
   res.json(readUpdateStatus());
 });
 
 // POST /api/aurora/settings/update/apply  { zipPath: '/absolute/path/to/update.zip' }
-router.post('/settings/update/apply', async (req, res) => {
+router.post('/settings/update/apply', requirePerm('settings.manage'), async (req, res) => {
   const { zipPath } = req.body;
 
   if (!zipPath) return res.status(400).json({ error: 'zipPath required' });
@@ -1142,7 +1465,7 @@ router.post('/settings/update/apply', async (req, res) => {
 // ── Privacy (hidden photos) ─────────────────────────────────────────────────
 
 // POST /api/aurora/assets/privacy  { assetIds, hidden: 1|0 }
-router.post('/assets/privacy', async (req, res) => {
+router.post('/assets/privacy', requirePerm('photos.hidden'), async (req, res) => {
   try {
     const hidden = (req.body && req.body.hidden) ? 1 : 0;
     const assetIds = ((req.body && req.body.assetIds) || []).map(n => parseInt(n)).filter(Number.isFinite);
@@ -1157,7 +1480,7 @@ router.post('/assets/privacy', async (req, res) => {
 });
 
 // POST /api/aurora/settings/passcode/verify  { passcode }
-router.post('/settings/passcode/verify', async (req, res) => {
+router.post('/settings/passcode/verify', requirePerm('photos.hidden'), async (req, res) => {
   try {
     const passcode = String((req.body && req.body.passcode) || '');
     const stored = await db.get(`SELECT value FROM app_settings WHERE key = 'private_passcode'`);
@@ -1166,7 +1489,7 @@ router.post('/settings/passcode/verify', async (req, res) => {
 });
 
 // POST /api/aurora/settings/passcode/set  { passcode }
-router.post('/settings/passcode/set', async (req, res) => {
+router.post('/settings/passcode/set', requirePerm('photos.hidden'), async (req, res) => {
   try {
     const passcode = String((req.body && req.body.passcode) || '').slice(0, 20);
     if (!passcode) return res.status(400).json({ error: 'passcode required' });
@@ -1176,7 +1499,7 @@ router.post('/settings/passcode/set', async (req, res) => {
 });
 
 // GET /api/aurora/settings/privacy/stats
-router.get('/settings/privacy/stats', async (req, res) => {
+router.get('/settings/privacy/stats', requirePerm('photos.hidden'), async (req, res) => {
   try {
     const h = await db.get('SELECT COUNT(*) AS count FROM assets WHERE hidden = 1 AND is_live_motion = 0');
     const d = await db.get('SELECT COUNT(*) AS count FROM assets WHERE duplicate_of IS NOT NULL');
@@ -1226,17 +1549,17 @@ function runDupScan() {
 }
 
 // POST /api/aurora/settings/duplicates/scan
-router.post('/settings/duplicates/scan', (req, res) => {
+router.post('/settings/duplicates/scan', requirePerm('settings.manage'), (req, res) => {
   if (dupScan.running) return res.json({ already: true, ...dupScan });
   runDupScan();
   res.json({ started: true });
 });
 
 // GET /api/aurora/settings/duplicates/status
-router.get('/settings/duplicates/status', (req, res) => res.json(dupScan));
+router.get('/settings/duplicates/status', requirePerm('settings.view'), (req, res) => res.json(dupScan));
 
 // GET /api/aurora/settings/duplicates  — groups of duplicate assets
-router.get('/settings/duplicates', async (req, res) => {
+router.get('/settings/duplicates', requirePerm('settings.view'), async (req, res) => {
   try {
     const groups = await db.all(
       `SELECT file_hash, COUNT(*) AS count FROM assets
@@ -1247,9 +1570,10 @@ router.get('/settings/duplicates', async (req, res) => {
     const result = [];
     for (const g of groups) {
       const assets = await db.all(
-        `SELECT a.id, a.path, a.taken_at, a.bytes, a.width, a.height, a.camera
+        `SELECT a.id, a.path, a.taken_at, a.bytes, a.width, a.height, a.camera, a.live_video_id
          FROM assets a WHERE a.file_hash = ? AND a.duplicate_of IS NULL AND a.is_live_motion = 0
-         ORDER BY a.taken_at ASC, a.id ASC`, [g.file_hash]
+         ORDER BY CASE WHEN a.live_video_id IS NOT NULL THEN 1 ELSE 0 END DESC,
+                  COALESCE(a.bytes,0) DESC, a.id ASC`, [g.file_hash]
       );
       if (assets.length > 1) result.push({ hash: g.file_hash, count: assets.length, assets });
     }
@@ -1258,7 +1582,7 @@ router.get('/settings/duplicates', async (req, res) => {
 });
 
 // POST /api/aurora/settings/duplicates/resolve  { keepId, removeIds }
-router.post('/settings/duplicates/resolve', async (req, res) => {
+router.post('/settings/duplicates/resolve', requirePerm('photos.delete'), async (req, res) => {
   try {
     const keepId = parseInt(req.body && req.body.keepId);
     const removeIds = ((req.body && req.body.removeIds) || []).map(n => parseInt(n)).filter(Number.isFinite);
@@ -1273,7 +1597,7 @@ router.post('/settings/duplicates/resolve', async (req, res) => {
 });
 
 // POST /api/aurora/settings/duplicates/resolve-all  — auto-keep largest in every group
-router.post('/settings/duplicates/resolve-all', async (req, res) => {
+router.post('/settings/duplicates/resolve-all', requirePerm('photos.delete'), async (req, res) => {
   try {
     const groups = await db.all(
       `SELECT file_hash FROM assets
@@ -1283,8 +1607,9 @@ router.post('/settings/duplicates/resolve-all', async (req, res) => {
     let resolved = 0, removed = 0;
     for (const g of groups) {
       const assets = await db.all(
-        `SELECT id, bytes FROM assets WHERE file_hash = ? AND duplicate_of IS NULL AND is_live_motion = 0
-         ORDER BY COALESCE(bytes,0) DESC, id ASC`, [g.file_hash]
+        `SELECT id, bytes, live_video_id FROM assets WHERE file_hash = ? AND duplicate_of IS NULL AND is_live_motion = 0
+         ORDER BY CASE WHEN live_video_id IS NOT NULL THEN 1 ELSE 0 END DESC,
+                  COALESCE(bytes,0) DESC, id ASC`, [g.file_hash]
       );
       if (assets.length < 2) continue;
       const keepId = assets[0].id;
@@ -1302,7 +1627,7 @@ router.post('/settings/duplicates/resolve-all', async (req, res) => {
 });
 
 // POST /api/aurora/settings/duplicates/unmark  { assetIds }
-router.post('/settings/duplicates/unmark', async (req, res) => {
+router.post('/settings/duplicates/unmark', requirePerm('photos.delete'), async (req, res) => {
   try {
     const assetIds = ((req.body && req.body.assetIds) || []).map(n => parseInt(n)).filter(Number.isFinite);
     if (!assetIds.length) return res.status(400).json({ error: 'assetIds required' });
@@ -1311,6 +1636,68 @@ router.post('/settings/duplicates/unmark', async (req, res) => {
       await db.run(`UPDATE assets SET duplicate_of = NULL WHERE id IN (${chunk.map(() => '?').join(',')})`, chunk);
     }
     res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Re-encoded / Live Photo duplicate detection (metadata signature) ──────────
+// The hash scan above only catches byte-identical files. It misses the same photo
+// re-exported at a different compression (different bytes → different hash), e.g.
+// an iPhone Live Photo and a "to sort" JPEG copy of it. We group those by a
+// metadata signature — exact capture time (sub-second when available) + camera +
+// orientation-normalised dimensions + filename stem — which is specific enough
+// that a burst sequence (distinct stems / sub-second times) never collides.
+// Keeper priority: the copy WITH a Live Photo wins, then largest file, then oldest
+// indexed. Pure DB work (no file reads); duplicates are hidden, never deleted, and
+// reversible via /duplicates/unmark.
+function metadataSignature(row) {
+  const w = row.width || 0, h = row.height || 0;
+  const dims = Math.min(w, h) + 'x' + Math.max(w, h);
+  const stem = path.basename(row.path || '').replace(/\.[^.]+$/, '').toLowerCase();
+  return `${row.taken_at}|${row.camera}|${dims}|${stem}`;
+}
+
+async function resolveMetadataDuplicates() {
+  const rows = await db.all(
+    `SELECT id, path, taken_at, camera, width, height, bytes, live_video_id
+     FROM assets
+     WHERE is_live_motion = 0 AND hidden = 0 AND duplicate_of IS NULL
+       AND taken_at IS NOT NULL AND camera IS NOT NULL`
+  );
+  const groups = new Map();
+  for (const r of rows) {
+    const sig = metadataSignature(r);
+    if (!groups.has(sig)) groups.set(sig, []);
+    groups.get(sig).push(r);
+  }
+
+  let resolvedGroups = 0, removed = 0;
+  for (const arr of groups.values()) {
+    if (arr.length < 2) continue;
+    // Keeper first: Live Photo > largest bytes > lowest id
+    arr.sort((a, b) => {
+      const live = (b.live_video_id ? 1 : 0) - (a.live_video_id ? 1 : 0);
+      if (live) return live;
+      const size = (b.bytes || 0) - (a.bytes || 0);
+      if (size) return size;
+      return a.id - b.id;
+    });
+    const keepId = arr[0].id;
+    const removeIds = arr.slice(1).map(a => a.id);
+    for (let i = 0; i < removeIds.length; i += 500) {
+      const chunk = removeIds.slice(i, i + 500);
+      await db.run(`UPDATE assets SET duplicate_of = ? WHERE id IN (${chunk.map(() => '?').join(',')})`, [keepId, ...chunk]);
+    }
+    resolvedGroups++;
+    removed += removeIds.length;
+  }
+  return { groups: resolvedGroups, removed };
+}
+
+// POST /api/aurora/settings/duplicates/scan-similar
+// Detect + auto-resolve re-encoded copies of the same photo (see above).
+router.post('/settings/duplicates/scan-similar', requirePerm('settings.manage'), async (req, res) => {
+  try {
+    res.json({ ok: true, ...(await resolveMetadataDuplicates()) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

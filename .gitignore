@@ -26,3 +26,7 @@ id_*
 Thumbs.db
 *.log
 *.swp
+
+# Internal handoff / scratch notes (may contain local paths, IPs, hostnames)
+*_HANDOFF.md
+NOTES.local.md

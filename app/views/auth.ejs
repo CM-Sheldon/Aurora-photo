@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+  <title>Aurora · <%= mode === 'setup' ? 'Set up admin' : 'Sign in' %></title>
+  <link rel="manifest" href="/aurora-manifest.json">
+  <meta name="theme-color" content="#06060c">
+  <link rel="apple-touch-icon" href="/aurora-icon-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --void: #06060c;
+      --panel: rgba(255,255,255,0.05);
+      --panel-hover: rgba(255,255,255,0.08);
+      --border: rgba(255,255,255,0.10);
+      --border-strong: rgba(255,255,255,0.18);
+      --text: rgba(255,255,255,0.92);
+      --text-muted: rgba(255,255,255,0.45);
+      --accent: #a78bfa;
+      --accent-sky: #7dd3fc;
+      --accent-orchid: #f0abfc;
+      --danger: #f87171;
+      --radius: 16px;
+      --radius-sm: 10px;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+    html, body { height: 100%; }
+    body {
+      background: var(--void);
+      color: var(--text);
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 14px;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+    }
+    .aurora-bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+    .aurora-bg span {
+      position: absolute; border-radius: 50%; filter: blur(120px);
+      opacity: 0.18; mix-blend-mode: screen; animation: drift 32s linear infinite;
+    }
+    .aurora-bg span:nth-child(1) { width: 700px; height: 500px; background: var(--accent); top: -100px; left: -150px; }
+    .aurora-bg span:nth-child(2) { width: 600px; height: 600px; background: var(--accent-sky); bottom: -200px; right: -100px; animation-delay: -12s; }
+    .aurora-bg span:nth-child(3) { width: 500px; height: 400px; background: var(--accent-orchid); top: 40%; left: 40%; animation-delay: -20s; }
+    @keyframes drift {
+      0% { transform: translate(0,0) scale(1); }
+      50% { transform: translate(60px,-40px) scale(1.05); }
+      100% { transform: translate(0,0) scale(1); }
+    }
+    .card {
+      position: relative; z-index: 1;
+      width: min(400px, 92vw);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px 28px;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+    }
+    .brand {
+      font-family: var(--font-mono);
+      font-size: 12px; letter-spacing: 3px; text-transform: uppercase;
+      color: var(--text-muted); margin-bottom: 8px;
+    }
+    h1 {
+      font-size: 22px; font-weight: 600; margin-bottom: 6px;
+      background: linear-gradient(135deg, #fff, var(--accent-sky));
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    p.lede { color: var(--text-muted); margin-bottom: 22px; font-size: 13px; line-height: 1.5; }
+    label { display: block; font-size: 12px; color: var(--text-muted); margin: 14px 0 6px; letter-spacing: 0.5px; text-transform: uppercase; }
+    input {
+      width: 100%; padding: 12px 14px;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text); font-family: inherit; font-size: 15px;
+      outline: none; transition: border-color .15s;
+    }
+    input:focus { border-color: var(--accent); }
+    input.pin { font-family: var(--font-mono); letter-spacing: 12px; text-align: center; font-size: 22px; padding-left: 22px; }
+    button {
+      width: 100%; margin-top: 22px; padding: 12px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-sky));
+      color: #06060c; font-family: inherit; font-weight: 600; font-size: 14px;
+      border: none; border-radius: var(--radius-sm);
+      cursor: pointer; letter-spacing: 0.5px;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button:hover:not(:disabled) { filter: brightness(1.08); }
+    .msg { margin-top: 14px; padding: 10px 12px; border-radius: var(--radius-sm); font-size: 13px; display: none; }
+    .msg.err { display: block; background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3); color: var(--danger); }
+    .hint { margin-top: 16px; font-size: 12px; color: var(--text-muted); text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="aurora-bg"><span></span><span></span><span></span></div>
+  <form class="card" id="f" autocomplete="off">
+    <div class="brand">Aurora</div>
+    <% if (mode === 'setup') { %>
+      <h1>Set up admin</h1>
+      <p class="lede">This is a fresh install. Pick an admin username and a 4-digit PIN — you'll use these to sign in from now on. You can add more users later.</p>
+    <% } else { %>
+      <h1>Sign in</h1>
+      <p class="lede">Enter your Aurora username and PIN.</p>
+    <% } %>
+    <label for="u">Username</label>
+    <input id="u" name="username" required autofocus autocomplete="username" spellcheck="false">
+    <label for="p">4-digit PIN</label>
+    <input id="p" name="pin" class="pin" required inputmode="numeric" pattern="\d{4}" maxlength="4" autocomplete="<%= mode === 'setup' ? 'new-password' : 'current-password' %>">
+    <% if (mode === 'setup') { %>
+      <label for="p2">Confirm PIN</label>
+      <input id="p2" name="pin2" class="pin" required inputmode="numeric" pattern="\d{4}" maxlength="4" autocomplete="new-password">
+    <% } %>
+    <button type="submit" id="go"><%= mode === 'setup' ? 'Create admin' : 'Sign in' %></button>
+    <div class="msg err" id="err"></div>
+    <% if (mode === 'setup') { %>
+      <p class="hint">This screen only appears on first setup.</p>
+    <% } %>
+  </form>
+  <script>
+    (function () {
+      var mode = <%- JSON.stringify(mode) %>;
+      var next = <%- JSON.stringify(nextUrl || '/aurora') %>;
+      var f = document.getElementById('f');
+      var err = document.getElementById('err');
+      var btn = document.getElementById('go');
+
+      // Numeric-only guard for both PIN boxes (belt + braces alongside pattern=)
+      ['p','p2'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('input', function () { el.value = el.value.replace(/\D/g,'').slice(0,4); });
+      });
+
+      f.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        err.style.display = 'none';
+        var username = document.getElementById('u').value.trim();
+        var pin = document.getElementById('p').value;
+        if (mode === 'setup') {
+          var pin2 = document.getElementById('p2').value;
+          if (pin !== pin2) { err.textContent = 'PINs do not match.'; err.style.display = 'block'; return; }
+        }
+        btn.disabled = true;
+        try {
+          var res = await fetch('/api/aurora/auth/' + (mode === 'setup' ? 'setup' : 'login'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: username, pin: pin }),
+          });
+          var body = await res.json().catch(function () { return {}; });
+          if (!res.ok) throw new Error(body.error || 'Something went wrong');
+          window.location.replace(next);
+        } catch (ex) {
+          err.textContent = ex.message;
+          err.style.display = 'block';
+          btn.disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

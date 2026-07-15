@@ -423,6 +423,12 @@ async function startThumbnailWarming() {
       warmState.phase = 'error';
     } finally {
       warmState.running = false;
+      // Post-warm hook, retained as a seam for downstream tasks (e.g. auto-
+      // starting a background job that reads cached thumbnails). No-op unless
+      // server.js wires it up. Fires only on a clean completion.
+      if (warmState.phase === 'complete' && onWarmingComplete) {
+        try { onWarmingComplete(); } catch (_) {}
+      }
     }
   })();
 
@@ -435,37 +441,87 @@ function getWarmState() { return warmState; }
 // An iPhone Live Photo is a still plus a short companion clip sharing the same
 // path-minus-extension (e.g. IMG_9055.HEIC + IMG_9055.MOV). We link the still to
 // its clip (assets.live_video_id) and flag the clip (is_live_motion=1) so it's
-// hidden from the main grid/timeline. Pure path matching — no file access — so it
-// safely backfills an existing library and is idempotent.
+// hidden from the main grid/timeline. Pure path + capture-time matching — no
+// file access — so it safely backfills an existing library and is idempotent.
+//
+// Two independent name-matches can produce the WRONG pair: iOS recycles its
+// IMG_NNNN counter over multi-year timelines, so IMG_1190.jpg from 2019 and
+// IMG_1190.MOV from 2021 can land in the same folder without being a real Live
+// Photo pair. A real pair is captured within milliseconds; anything more than
+// LIVE_MAX_TIME_GAP_MS apart is a filename collision. Both sides must therefore
+// have a known taken_at (iOS files always do) and their gap must be within the
+// window. If either side has NULL taken_at we refuse to pair — that's the safe
+// call because on this library ~26% of assets are timestamp-less (scans,
+// exported without EXIF, etc.) and none of those are Live Photos.
+//
+// Note: a single base name can have multiple photo variants (e.g. IMG_0015.JPG
+// and IMG_0015.PNG exported by iOS). We link ALL variants whose taken_at also
+// matches the clip so none appear as an orphan without the Live badge.
 const LIVE_MAX_DURATION_S = 6;
+const LIVE_MAX_TIME_GAP_MS = 5000;
 
 async function linkLivePhotos() {
   const stripExt = (p) => p.replace(/\.[^./]+$/, '').toLowerCase();
 
-  const photos = await db.all(`SELECT id, path FROM assets WHERE kind='photo'`);
-  const photoByBase = new Map();
-  for (const p of photos) photoByBase.set(stripExt(p.path), p.id);
+  const photos = await db.all(`SELECT id, path, taken_at FROM assets WHERE kind='photo'`);
+  // Map base path → array of photos (multiple extensions can share a base).
+  const photosByBase = new Map();
+  for (const p of photos) {
+    const base = stripExt(p.path);
+    if (!photosByBase.has(base)) photosByBase.set(base, []);
+    photosByBase.get(base).push(p);
+  }
 
-  const videos = await db.all(`SELECT id, path, duration_s FROM assets WHERE kind='video'`);
+  const videos = await db.all(`SELECT id, path, duration_s, taken_at FROM assets WHERE kind='video'`);
 
-  let linked = 0;
+  let linked = 0, cleared = 0, rejectedByTime = 0;
   await db.run('BEGIN').catch(() => {});
   try {
+    // Rebuild from scratch. Any prior pairing (correct or not) is wiped so the
+    // new algorithm's answer wins deterministically. Without this the button
+    // felt like it "did nothing" — it re-set correct pairs but couldn't undo
+    // stale wrong ones. cleared counts what changed so the UI can prove it.
+    const prev = await db.get(
+      `SELECT
+         (SELECT COUNT(*) FROM assets WHERE live_video_id IS NOT NULL)    AS photos_linked,
+         (SELECT COUNT(*) FROM assets WHERE is_live_motion = 1)           AS videos_flagged`
+    );
+    await db.run('UPDATE assets SET live_video_id = NULL WHERE live_video_id IS NOT NULL');
+    await db.run('UPDATE assets SET is_live_motion = 0 WHERE is_live_motion = 1');
+
     for (const v of videos) {
       // Live clips are always short; never hide a full-length namesake video.
       if (v.duration_s != null && v.duration_s > LIVE_MAX_DURATION_S) continue;
-      const photoId = photoByBase.get(stripExt(v.path));
-      if (!photoId) continue;
-      await db.run('UPDATE assets SET live_video_id = ? WHERE id = ?', [v.id, photoId]);
+      const candidates = photosByBase.get(stripExt(v.path));
+      if (!candidates || !candidates.length) continue;
+
+      // Timestamp gate: keep only photos whose taken_at is within the window of
+      // the video's taken_at. Missing timestamps → skip; iOS Live Photos always
+      // have both, so this only excludes accidental basename collisions.
+      const matches = [];
+      for (const p of candidates) {
+        if (p.taken_at == null || v.taken_at == null) { rejectedByTime++; continue; }
+        if (Math.abs(p.taken_at - v.taken_at) > LIVE_MAX_TIME_GAP_MS) { rejectedByTime++; continue; }
+        matches.push(p);
+      }
+      if (!matches.length) continue;
+
+      for (const p of matches) {
+        await db.run('UPDATE assets SET live_video_id = ? WHERE id = ?', [v.id, p.id]);
+        linked++;
+      }
       await db.run('UPDATE assets SET is_live_motion = 1 WHERE id = ?', [v.id]);
-      linked++;
     }
+    // Net change from the previous state — surfaced to the UI so the user can
+    // see the button actually did something even when the total link count
+    // hasn't moved.
+    cleared = Math.max(0, (prev && prev.photos_linked || 0) - linked);
     await db.run('COMMIT').catch(() => {});
   } catch (err) {
     await db.run('ROLLBACK').catch(() => {});
     throw err;
   }
-  return { linked };
+  return { linked, cleared, rejectedByTime };
 }
 
 // Called on server startup: any session still marked 'running' was killed
@@ -480,6 +536,22 @@ function getSession(sessionId) {
   return activeSessions.get(sessionId) || null;
 }
 
+// True while any import is actively scanning/indexing. Background workers (e.g.
+// the caption service) check this so heavy work pauses during an import — avoids
+// memory contention on the 2GB box. Completed/errored sessions linger in the Map
+// but don't count.
+function isIndexing() {
+  for (const s of activeSessions.values()) {
+    if (s.status === 'scanning' || s.status === 'indexing') return true;
+  }
+  return false;
+}
+
+// Hook fired once thumbnail warming finishes. Seam retained for future use — no
+// current caller (was previously used to auto-start the removed COCO-SSD tagger).
+let onWarmingComplete = null;
+function setWarmingCompleteHook(fn) { onWarmingComplete = fn; }
+
 function getThumbPath(assetId, size = 'grid') {
   return path.join(THUMB_DIR, `${assetId}_${size}.webp`);
 }
@@ -492,6 +564,7 @@ module.exports = {
   startImport, getSession, getThumbPath, ensureThumb,
   recoverInterruptedSessions, videoMimeType, shutdown,
   startThumbnailWarming, getWarmState, linkLivePhotos,
+  isIndexing, setWarmingCompleteHook,
   // Exported for unit tests
   extractTakenAt, parseExifDate, dateFromFilename,
   THUMB_DIR, INDEX_CONCURRENCY, THUMB_CONCURRENCY

@@ -5,8 +5,27 @@ were taken, albums, powerful fuzzy search, Live Photo support, and import from l
 folders or SMB/NFS network shares. Your originals are never modified — Aurora only
 builds an index and thumbnail cache.
 
-Highlights:
+## Install (one line)
 
+On a fresh Linux server:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CM-Sheldon/Aurora-photo/main/get-aurora.sh | sudo bash
+```
+
+That downloads the latest release, extracts it and runs the installer. When it
+finishes it prints a URL like `http://<server-ip>:8080/aurora`. Open that in your
+browser — **the first visitor sets up the admin account**.
+
+Prefer to download the zip yourself? See [Install (manual)](#install-manual) below.
+
+## Highlights
+
+- **Users, roles & audit log** — first visitor to a fresh install claims the admin
+  account (username + 4-digit PIN). Admin can add more users, hand out custom roles
+  from an ACL checkbox tree (settings access, hidden-album access, tagging rights,
+  download originals, delete, etc.), reset PINs, and see who did what in an audit
+  log. Two roles ship built-in: `admin` (everything) and `user` (view + favorite).
 - **Tags & smart tagging** — tag any photo from its info panel. Tag one photo of a
   trip (e.g. *Cyprus Holiday 2024*) and Aurora finds the rest of that trip (same
   place, same stretch of dates) and offers to tag them all in one click. Manage,
@@ -49,12 +68,16 @@ After installation two directories are created:
   update.log              — log of past in-app update runs
 ```
 
-## Install (fresh Linux server)
+## Install (manual)
+
+If you'd rather not pipe a script into `sudo bash`, download the installer zip
+manually from the [latest release](https://github.com/CM-Sheldon/Aurora-photo/releases/latest)
+and run it yourself:
 
 1. Extract this zip and `cd` into the extracted folder:
 
    ```bash
-   unzip aurora-photos-installer.zip
+   unzip aurora-photos-installer-*.zip
    cd aurora-photos
    ```
 
@@ -68,6 +91,13 @@ After installation two directories are created:
 
 The installer is **idempotent** — if anything goes wrong, fix it and run
 `sudo ./install.sh` again. It preserves all user data across re-runs.
+
+### First-run: claim admin
+
+The first person to open `/aurora` on a fresh install lands on a **Set up admin**
+screen — pick a username and a 4-digit PIN and that account becomes the admin.
+From then on the app requires login, and only the admin can add more users. You
+can add users any time from **Settings → Users & roles**.
 
 ### Options
 
@@ -117,6 +147,31 @@ applied automatically as photos are imported — no network, no API keys.
 
 > Note: the dataset is **data**, not code, so software updates never overwrite it —
 > a fresh install seeds it; updates leave whatever you have in place.
+
+### Users & roles
+
+Aurora ships with two built-in roles:
+
+| Role  | What they can do |
+|-------|------------------|
+| `admin` | Everything: browse, tag, hide, download originals, delete, manage users, edit roles, apply updates, view the audit log. |
+| `user`  | View the library and mark favorites — nothing else by default. Intended for family members who should browse but not curate. |
+
+You can also create **custom roles** from **Settings → Users & roles → New role**
+and grant any combination of these permissions:
+
+- `photos.view`, `photos.favorite`, `photos.tag`, `photos.download`
+- `photos.hidden` — see and manage the hidden album
+- `photos.delete` — resolve duplicates and remove assets
+- `settings.view`, `settings.manage`
+- `users.manage`, `roles.manage`, `audit.view`
+
+Sessions live in a `httpOnly` cookie and roll for 30 days on activity. PINs are
+hashed with scrypt; five wrong attempts locks the account for 15 min. Resetting
+a user's PIN signs them out of every device.
+
+Every login, permission change, PIN reset and destructive action is recorded in
+**Settings → Audit log** (admin only).
 
 ### Tagging & smart tagging
 

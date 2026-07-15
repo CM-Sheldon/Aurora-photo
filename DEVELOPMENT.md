@@ -22,7 +22,7 @@ touched by updates.
 
 | Path | Role |
 |------|------|
-| `/home/aurora-service/aurora-photos/` | this git checkout — **edit here** |
+| `~/aurora-photos/` (your checkout) | this git repo — **edit here** |
 | `/opt/aurora-photos/` | the running install (replaced by updates) |
 | `/var/lib/aurora-photos/` | data (DB, thumbs) — never touched |
 

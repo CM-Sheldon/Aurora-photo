@@ -264,6 +264,10 @@
       grid-template-columns: repeat(auto-fill, minmax(var(--tile-size, 180px), 1fr));
       gap: 4px;
     }
+    /* Virtualized search grid: only on-screen tiles exist (absolutely positioned),
+       so scrolling thousands of results stays smooth on mobile. */
+    #searchGrid.virtual { display: block; position: relative; }
+    #searchGrid.virtual .photo-tile { position: absolute; }
     .photo-tile {
       aspect-ratio: 1; border-radius: 6px; overflow: hidden;
       background: rgba(255,255,255,0.04); cursor: pointer; position: relative;
@@ -527,6 +531,24 @@
     .search-icon.busy { animation: spin 0.7s linear infinite; color: var(--accent); }
     @keyframes spin { to { transform: translateY(-50%) rotate(360deg); } }
 
+    /* Committed search-term chips that accumulate under the search bar (each Enter
+       adds one; all are ANDed). */
+    .search-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 20px; margin-bottom: 12px; }
+    .search-chips:empty { display: none; }
+    .search-term-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 8px 5px 12px; border-radius: 999px;
+      background: rgba(167,139,250,0.16); border: 1px solid var(--accent);
+      color: var(--text); font-size: 13px; line-height: 1; white-space: nowrap;
+    }
+    .search-term-chip button {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 16px; height: 16px; border-radius: 50%; border: none;
+      background: rgba(255,255,255,0.12); color: var(--text-muted);
+      font-size: 11px; cursor: pointer; padding: 0;
+    }
+    .search-term-chip button:hover { background: rgba(255,255,255,0.25); color: var(--text); }
+
     /* ── ALBUMS SCREEN ── */
     .albums-content { flex: 1; overflow-y: auto; padding: 20px; }
     .albums-section-title {
@@ -765,6 +787,30 @@
     .meta-section-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--accent); margin: 18px 0 6px; }
     .meta-section-title:first-child { margin-top: 0; }
 
+    /* ── Caption (info panel, read-only natural-language description) ── */
+    .meta-caption { font-size: 13.5px; line-height: 1.5; color: var(--text); margin: 4px 0 10px; font-style: italic; }
+
+    /* ── Photo captioning control panel (Settings → Manage) ── */
+    .cap-last { display: flex; gap: 12px; align-items: flex-start; padding: 10px; background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 10px; }
+    .cap-last-thumb { width: 96px; height: 96px; object-fit: cover; border-radius: 8px; background: rgba(255,255,255,0.05); flex-shrink: 0; }
+    .cap-last-text { min-width: 0; }
+    .cap-last-cap { font-size: 13px; line-height: 1.45; color: var(--text); }
+    .cap-last-meta { font-size: 11px; color: var(--text-faint); margin-top: 6px; font-family: var(--font-mono); }
+    .cap-log-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--accent); margin: 16px 0 8px; }
+    .cap-log { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
+    .cap-log-row { display: flex; gap: 9px; align-items: center; font-size: 12px; }
+    .cap-log-thumb { width: 34px; height: 34px; object-fit: cover; border-radius: 6px; background: rgba(255,255,255,0.05); flex-shrink: 0; }
+    .cap-log-cap { flex: 1; min-width: 0; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cap-log-cap.err { color: #f87171; }
+    .cap-log-cap.skip { color: var(--text-faint); font-style: italic; }
+    .cap-log-time { font-size: 10px; color: var(--text-faint); font-family: var(--font-mono); flex-shrink: 0; }
+    .cap-settings { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+    .cap-settings > summary { cursor: pointer; font-size: 13px; color: var(--text-muted); user-select: none; list-style: revert; }
+    .cap-settings > summary:hover { color: var(--text); }
+    .cap-set-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+    .cap-set-grid label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--text-muted); }
+    @media (max-width: 640px) { .cap-set-grid { grid-template-columns: 1fr; } }
+
     /* ── Tags (info panel) ── */
     .meta-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
     .meta-tag {
@@ -919,6 +965,53 @@
     .stab-panel { display:none; }
     .stab-panel.active { display:block; }
 
+    /* ── RBAC (Users, Roles, Audit) ── */
+    .rbac-table { width:100%; border-collapse:collapse; margin-top:8px; font-size:13px; }
+    .rbac-table th, .rbac-table td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:middle; }
+    .rbac-table th { color:var(--text-muted); font-weight:500; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; }
+    .rbac-table td { color:var(--text); }
+    .rbac-table td .muted { color:var(--text-muted); font-size:12px; }
+    .rbac-table select, .rbac-table input { background:rgba(0,0,0,0.3); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-family:inherit; font-size:12px; }
+    .rbac-badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; letter-spacing:0.5px; }
+    .rbac-badge.admin { background:rgba(167,139,250,0.18); color:var(--accent); }
+    .rbac-badge.user { background:rgba(125,211,252,0.15); color:var(--accent-sky); }
+    .rbac-badge.custom { background:rgba(240,171,252,0.15); color:var(--accent-orchid); }
+    .rbac-badge.disabled { background:rgba(248,113,113,0.15); color:#f87171; }
+    .rbac-row-actions { display:flex; gap:6px; justify-content:flex-end; }
+    .rbac-row-actions .btn { font-size:11px; padding:5px 10px; }
+    .rbac-perm-group { margin-top:14px; }
+    .rbac-perm-group h4 { font-size:11px; text-transform:uppercase; letter-spacing:0.8px; color:var(--text-muted); margin-bottom:6px; }
+    .rbac-perm-list { display:grid; grid-template-columns:1fr; gap:6px; }
+    .rbac-perm-list label { display:flex; align-items:flex-start; gap:8px; font-size:13px; color:var(--text); cursor:pointer; }
+    .rbac-perm-list label input { margin-top:3px; accent-color:var(--accent); }
+    .rbac-perm-list label span.desc { color:var(--text-muted); font-size:12px; margin-left:4px; }
+
+    /* ── User / role dialog (reuses passcode-overlay backdrop pattern) ── */
+    .rbac-dialog { background:rgba(14,14,24,0.97); border:1px solid var(--border-strong); border-radius:var(--radius); padding:24px 22px; width:min(440px, 92vw); max-height:88vh; overflow-y:auto; backdrop-filter:blur(24px); }
+    .rbac-dialog h3 { font-size:16px; font-weight:600; margin-bottom:14px; }
+    .rbac-dialog label.field { display:block; font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin:10px 0 4px; }
+    .rbac-dialog input[type=text], .rbac-dialog input[type=password], .rbac-dialog select { width:100%; background:rgba(0,0,0,0.3); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:9px 11px; font-family:inherit; font-size:14px; outline:none; }
+    .rbac-dialog input:focus, .rbac-dialog select:focus { border-color:var(--accent); }
+    .rbac-dialog .actions { display:flex; gap:8px; justify-content:flex-end; margin-top:18px; }
+    .rbac-dialog .err { display:none; margin-top:10px; padding:8px 10px; background:rgba(248,113,113,0.1); border:1px solid rgba(248,113,113,0.3); border-radius:8px; color:#f87171; font-size:12px; }
+    .rbac-dialog .err.show { display:block; }
+
+    /* ── Topbar user chip ── */
+    .user-chip { display:flex; align-items:center; gap:6px; padding:6px 10px; border-radius:20px; background:var(--panel); border:1px solid var(--border); font-size:12px; color:var(--text); cursor:pointer; font-family:inherit; }
+    .user-chip:hover { background:var(--panel-hover); }
+    .user-menu { position:absolute; right:16px; top:52px; background:rgba(14,14,24,0.97); border:1px solid var(--border-strong); border-radius:12px; padding:8px; min-width:180px; backdrop-filter:blur(24px); z-index:1000; box-shadow:0 8px 24px rgba(0,0,0,0.4); display:none; }
+    .user-menu.show { display:block; }
+    .user-menu .row { padding:8px 12px; border-radius:8px; cursor:pointer; font-size:13px; color:var(--text); }
+    .user-menu .row:hover { background:var(--panel-hover); }
+    .user-menu .row.head { color:var(--text-muted); cursor:default; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; padding-top:4px; padding-bottom:6px; }
+    .user-menu .row.head:hover { background:none; }
+
+    /* Hide anything marked perm-gated until we know it's allowed. */
+    .perm-gated { display:none; }
+    /* Until loadMe() runs, hide permission-gated elements so a plain user
+       never sees an admin control flash into view then disappear. */
+    body:not(.perms-ready) [data-perm], body:not(.perms-ready) [data-perm-any] { visibility:hidden; }
+
     /* ── Passcode overlay ── */
     .passcode-overlay { position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;display:flex;align-items:center;justify-content:center; }
     .passcode-card { background:rgba(14,14,24,0.97);border:1px solid var(--border-strong);border-radius:var(--radius);padding:32px 28px;max-width:320px;width:90%;text-align:center;backdrop-filter:blur(24px); }
@@ -1002,9 +1095,12 @@
     .btn:active, .btn-ghost:active, .lb-btn:active, .icon-btn:active,
     .sel-btn:active, .chip:active, .tab-btn:active, .stab:active,
     .nav-item:active, .bnav-item:active, .smart-album:active,
-    .search-filter-toggle:active, .map-ctrl:active, .lightbox-nav:active {
+    .search-filter-toggle:active, .map-ctrl:active {
       transform: scale(0.95);
     }
+    /* Nav arrows are centred with translateY(-50%); keep it in the press state so
+       the button shrinks in place instead of dropping out from under the cursor. */
+    .lightbox-nav:active { transform: translateY(-50%) scale(0.95); }
 
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
@@ -1170,8 +1266,8 @@
         <div class="nav-item" data-screen="albums">
           <span class="nav-icon">⊞</span> Albums
         </div>
-        <div class="nav-section">System</div>
-        <div class="nav-item" data-screen="settings">
+        <div class="nav-section" data-perm-any="settings.view users.manage audit.view photos.hidden">System</div>
+        <div class="nav-item" data-screen="settings" data-perm-any="settings.view users.manage audit.view photos.hidden">
           <span class="nav-icon">⚙</span> Settings &amp; Import
         </div>
       </nav>
@@ -1220,7 +1316,10 @@
           </div>
         </div>
         <div class="photo-grid-wrap" id="photoGridWrap">
-          <div class="empty-state" id="libraryEmpty">
+          <div class="empty-state" id="libraryLoading">
+            <div class="empty-icon" style="animation:spin 1s linear infinite;display:inline-block;">◌</div>
+          </div>
+          <div class="empty-state" id="libraryEmpty" style="display:none;">
             <div class="empty-icon">✦</div>
             <div class="empty-title">No photos yet</div>
             <div class="empty-desc">Import a folder to start building your library. Aurora indexes metadata without touching your originals.</div>
@@ -1276,8 +1375,9 @@
         <div class="search-wrap-inner">
           <div class="search-input-wrap" style="padding-top:14px;">
             <span class="search-icon" id="searchIcon">⌕</span>
-            <input type="text" class="search-input" id="searchInput" placeholder="Search anything — “cyprus 2019”, “iphone videos”, “favourites”…">
+            <input type="text" class="search-input" id="searchInput" placeholder="Search — places, dates, tags, or describe a photo (e.g. girl holding a coffee)">
           </div>
+          <div class="search-chips" id="searchChips"></div>
           <button class="search-filter-toggle" id="searchFilterToggle" onclick="toggleSearchFilters()">⚙ Filters <span class="ft-count" id="searchFilterCount">0</span></button>
           <div class="search-layout">
             <div class="search-sidebar">
@@ -1358,12 +1458,14 @@
 
           <!-- Sub-tab bar -->
           <div class="settings-tabs">
-            <button class="stab active" data-stab="library" onclick="switchSettingsTab(this)">Library</button>
-            <button class="stab" data-stab="import" onclick="switchSettingsTab(this)">Import</button>
-            <button class="stab" data-stab="manage" onclick="switchSettingsTab(this)">Manage</button>
-            <button class="stab" data-stab="privacy" onclick="switchSettingsTab(this)">Privacy</button>
-            <button class="stab" data-stab="duplicates" onclick="switchSettingsTab(this)">Duplicates</button>
-            <button class="stab" data-stab="system" onclick="switchSettingsTab(this)">System</button>
+            <button class="stab active" data-stab="library" data-perm="settings.view" onclick="switchSettingsTab(this)">Library</button>
+            <button class="stab" data-stab="import" data-perm="settings.manage" onclick="switchSettingsTab(this)">Import</button>
+            <button class="stab" data-stab="manage" data-perm="settings.manage" onclick="switchSettingsTab(this)">Manage</button>
+            <button class="stab" data-stab="privacy" data-perm="photos.hidden" onclick="switchSettingsTab(this)">Privacy</button>
+            <button class="stab" data-stab="duplicates" data-perm="settings.view" onclick="switchSettingsTab(this)">Duplicates</button>
+            <button class="stab" data-stab="system" data-perm="settings.manage" onclick="switchSettingsTab(this)">System</button>
+            <button class="stab admin-only" data-stab="users" onclick="switchSettingsTab(this)" style="display:none;">Users &amp; roles</button>
+            <button class="stab admin-only" data-stab="audit" onclick="switchSettingsTab(this)" style="display:none;">Audit log</button>
           </div>
 
           <!-- ── LIBRARY TAB ── -->
@@ -1504,6 +1606,68 @@
               <div id="tagManager"><span style="font-size:12px;color:var(--text-faint)">Loading…</span></div>
             </div>
 
+            <div class="settings-section-title">Content recognition</div>
+            <div class="import-card">
+              <div class="import-card-title">Photo descriptions <span style="font-weight:400;color:var(--text-faint);font-size:12px;">· natural-language search</span></div>
+              <div class="card-help">Writes a short description of each photo with a vision&nbsp;AI model so you can search in plain English — e.g. <b>“girl holding a coffee”</b> or <b>“dog on a beach”</b> — and combine it with places and dates. The model runs on your <b>Ollama</b> server; this app only stores and searches the text. Progress is saved, so it resumes after a stop or restart.</div>
+
+              <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px;">
+                <button class="btn" id="capStartBtn" onclick="capStart(this)">Start</button>
+                <button class="btn btn-ghost" id="capStopBtn" onclick="capStop(this)" style="display:none;">Stop</button>
+                <div id="capStatus" class="action-status"></div>
+              </div>
+              <div id="capProgress" style="display:none;margin-top:12px;">
+                <div class="progress-bar-wrap"><div class="progress-bar" id="capProgressBar" style="width:0%"></div></div>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:4px;" id="capProgressLabel">—</div>
+              </div>
+
+              <!-- Live monitor: last image captioned + recent activity -->
+              <div id="capMonitor" style="display:none;margin-top:16px;">
+                <div class="cap-last">
+                  <img id="capLastThumb" class="cap-last-thumb" alt="">
+                  <div class="cap-last-text">
+                    <div class="cap-last-cap" id="capLastCap"></div>
+                    <div class="cap-last-meta" id="capLastMeta"></div>
+                  </div>
+                </div>
+                <div class="cap-log-title">Recent activity</div>
+                <div id="capLog" class="cap-log"></div>
+              </div>
+
+              <!-- Model & server settings (collapsible) -->
+              <details class="cap-settings" id="capSettings">
+                <summary>Model &amp; server settings</summary>
+                <div class="cap-set-grid">
+                  <label>Ollama server
+                    <input type="text" id="capUrl" class="path-input" placeholder="http://localhost:11434" autocomplete="off" spellcheck="false">
+                  </label>
+                  <label>Model
+                    <div style="display:flex;gap:8px;align-items:center;">
+                      <select id="capModel" class="path-input" style="flex:1;"></select>
+                      <button class="btn btn-ghost" id="capTestBtn" onclick="capTestConnection(this)" style="white-space:nowrap;font-size:12px;">Test</button>
+                    </div>
+                    <div id="capModelHint" style="font-size:11px;color:var(--text-faint);margin-top:4px;"></div>
+                  </label>
+                  <label>Description style
+                    <select id="capStyle" class="path-input"></select>
+                  </label>
+                  <label>Parallel requests
+                    <select id="capConc" class="path-input">
+                      <option value="1">1 (gentlest)</option>
+                      <option value="2">2</option>
+                      <option value="3">3</option>
+                      <option value="4">4 (fastest)</option>
+                    </select>
+                  </label>
+                </div>
+                <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                  <button class="btn" id="capSaveBtn" onclick="capSaveConfig(this)">Save settings</button>
+                  <div id="capSaveStatus" class="action-status"></div>
+                </div>
+                <div class="card-help" style="margin-top:10px;">Settings can be saved any time; changes apply when captioning next starts. Use a <b>vision</b> model (e.g. <code>qwen2.5vl:3b</code>) — text-only models can’t read images.</div>
+              </details>
+            </div>
+
             <div class="settings-section-title">Maintenance</div>
             <div class="import-card">
               <div class="import-card-title">One-click actions</div>
@@ -1576,6 +1740,15 @@
                 <div class="progress-bar-wrap"><div class="progress-bar" id="dupProgressBar" style="width:0%"></div></div>
                 <div style="font-size:12px;color:var(--text-muted);margin-top:4px;" id="dupProgressLabel">—</div>
               </div>
+
+              <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border);">
+                <div style="font-size:13px;color:var(--text);font-weight:500;margin-bottom:4px;">Re-encoded &amp; Live Photo copies</div>
+                <div class="card-help" style="margin-top:0;">Finds the <b>same photo saved twice</b> at different compression (so the bytes differ and the exact scan above misses them) — e.g. a Live Photo and a re-exported JPEG copy. Matches on capture time, camera, dimensions and filename. The copy <b>with Live Photo motion is always kept</b> (then the largest file). Hidden, never deleted.</div>
+                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px;">
+                  <button class="btn" id="dupSimilarBtn" onclick="startSimilarScan()">Find re-encoded copies</button>
+                  <div id="dupSimilarStatus" class="action-status"></div>
+                </div>
+              </div>
             </div>
 
             <div id="dupGroupsCard" style="display:none;">
@@ -1588,13 +1761,45 @@
           </div>
 
           <!-- ── SYSTEM TAB ── -->
+          <!-- ── USERS & ROLES TAB (admin only) ── -->
+          <div class="stab-panel" id="stab-users">
+            <div class="import-card">
+              <div class="import-card-title">Users</div>
+              <div class="card-help">Add people who can sign in to Aurora. Each user gets a role that decides what they can do.</div>
+              <table class="rbac-table" id="usersTable"><thead>
+                <tr><th>Username</th><th>Role</th><th>Status</th><th>Last seen</th><th></th></tr>
+              </thead><tbody><tr><td colspan="5" style="color:var(--text-faint);">Loading…</td></tr></tbody></table>
+              <button class="btn" style="margin-top:12px;" onclick="openUserAddDialog()">+ Add user</button>
+            </div>
+            <div class="import-card">
+              <div class="import-card-title">Roles</div>
+              <div class="card-help">Built-in <b>admin</b> and <b>user</b> roles cover most needs. Create custom roles for finer-grained permissions.</div>
+              <table class="rbac-table" id="rolesTable"><thead>
+                <tr><th>Name</th><th>Type</th><th>Permissions</th><th></th></tr>
+              </thead><tbody><tr><td colspan="4" style="color:var(--text-faint);">Loading…</td></tr></tbody></table>
+              <button class="btn" style="margin-top:12px;" onclick="openRoleDialog()">+ New role</button>
+            </div>
+          </div>
+
+          <!-- ── AUDIT LOG TAB (admin only) ── -->
+          <div class="stab-panel" id="stab-audit">
+            <div class="import-card">
+              <div class="import-card-title">Recent activity</div>
+              <div class="card-help">Every login, user/role change, and destructive action is logged here.</div>
+              <table class="rbac-table" id="auditTable"><thead>
+                <tr><th>When</th><th>User</th><th>Action</th><th>Target</th><th>Details</th></tr>
+              </thead><tbody><tr><td colspan="5" style="color:var(--text-faint);">Loading…</td></tr></tbody></table>
+              <button class="btn btn-ghost" style="margin-top:12px;" onclick="loadAudit()">↻ Refresh</button>
+            </div>
+          </div>
+
           <div class="stab-panel" id="stab-system">
             <div class="import-card">
               <div class="import-card-title">Apply an update</div>
               <div id="updateVersionLine" style="font-size:13px;color:var(--text-muted);margin-bottom:6px;">Loading version…</div>
               <div class="card-help">Place an Aurora update zip on this server, then enter its full path below and click Apply. Your photo library, thumbnails, and favourites are never touched by an update.</div>
               <div class="update-row">
-                <input type="text" id="updateZipPath" placeholder="/home/aurora-service/aurora-photos-update.zip" autocomplete="off" spellcheck="false">
+                <input type="text" id="updateZipPath" placeholder="/opt/aurora-updates/aurora-photos-update.zip" autocomplete="off" spellcheck="false">
                 <button class="btn" id="updateApplyBtn" onclick="applyUpdate()">Apply Update</button>
               </div>
               <div class="update-status" id="updateStatus"></div>
@@ -1613,8 +1818,16 @@
     <div class="bnav-item" data-screen="places"><span class="bnav-icon">◎</span><span>Places</span></div>
     <div class="bnav-item" data-screen="search"><span class="bnav-icon">⌕</span><span>Search</span></div>
     <div class="bnav-item" data-screen="albums"><span class="bnav-icon">⊞</span><span>Albums</span></div>
-    <div class="bnav-item" data-screen="settings"><span class="bnav-icon">⚙</span><span>Settings</span></div>
+    <div class="bnav-item" data-screen="settings" data-perm-any="settings.view users.manage audit.view photos.hidden"><span class="bnav-icon">⚙</span><span>Settings</span></div>
   </nav>
+
+  <!-- RBAC dialog (users / roles). Reuses passcode-overlay backdrop. -->
+  <div class="passcode-overlay" id="rbacOverlay" style="display:none;" onclick="if(event.target===this) closeRbacDialog()">
+    <div class="rbac-dialog" id="rbacDialog"></div>
+  </div>
+
+  <!-- Signed-in user menu (logout, etc.) — positioned via .user-menu absolute -->
+  <div class="user-menu" id="userMenu"></div>
 
   <!-- Passcode modal -->
   <div class="passcode-overlay" id="passcodeOverlay" style="display:none;">
@@ -1668,10 +1881,10 @@
     <span class="sel-count" id="selCount">0 selected</span>
     <div class="sel-main">
       <button class="sel-btn" onclick="selSelectAll()">Select all</button>
-      <button class="sel-btn sel-primary" onclick="selStartAddTag()">＋ Add tag</button>
-      <button class="sel-btn" onclick="selStartRemoveTag()">－ Remove tag</button>
-      <button class="sel-btn" id="selPrivateBtn" onclick="selHidePhotos()">🔒 Hide</button>
-      <button class="sel-btn" id="selShareBtn" onclick="shareSelection()">⤴ Share</button>
+      <button class="sel-btn sel-primary" data-perm="photos.tag" onclick="selStartAddTag()">＋ Add tag</button>
+      <button class="sel-btn" data-perm="photos.tag" onclick="selStartRemoveTag()">－ Remove tag</button>
+      <button class="sel-btn" id="selPrivateBtn" data-perm="photos.hidden" onclick="selHidePhotos()">🔒 Hide</button>
+      <button class="sel-btn" id="selShareBtn" data-perm="photos.download" onclick="shareSelection()">⤴ Share</button>
       <button class="sel-btn" onclick="exitSelectMode()">Done</button>
     </div>
     <div class="sel-entry" id="selTagEntry" style="display:none;">
@@ -1739,7 +1952,8 @@
       importSSE: null,
       hideRaw: (() => { try { return localStorage.getItem('aurora_hideRaw') === '1'; } catch (_) { return false; } })(),
       privateUnlocked: false,  // true after correct passcode entered this session
-      hiddenMode: false,        // true when browsing the hidden album,
+      hiddenMode: false,        // true when browsing the hidden album
+      assetsLoaded: false,      // true after loadIndex() completes
     };
 
     // ── Screen routing ──
@@ -1835,7 +2049,10 @@
       const m = Math.floor(s / 60), sec = s % 60;
       return `${m}:${String(sec).padStart(2,'0')}`;
     }
-    function thumbUrl(id, size='grid') { return `/api/aurora/thumb/${id}?size=${size}`; }
+    // Cache epoch (latest import time) busts stale browser-cached thumbnails after
+    // a re-import reassigns asset ids — see the /aurora route in server.js.
+    const CACHE_EPOCH = '<%= typeof cacheEpoch !== "undefined" ? cacheEpoch : "0" %>';
+    function thumbUrl(id, size='grid') { return `/api/aurora/thumb/${id}?size=${size}&v=${CACHE_EPOCH}`; }
 
     // ── Load stats ──
     async function loadStats() {
@@ -1856,6 +2073,10 @@
         const data = await raw.json().catch(() => []);
         // Map compact wire fields (t,k,f,lv) back to full names used across the UI
         state.assets = data.map(r => ({ id: r.id, taken_at: r.t, kind: r.k, fav: r.f, live_video_id: r.lv }));
+        // We now have a definitive answer (possibly empty) — set before any early
+        // return so computeGridLayout() shows the real empty state, not a blank
+        // screen, and the boot spinner is dismissed.
+        state.assetsLoaded = true;
         if (!state.assets.length) { renderGrid(); return; }
 
         // NOTE: never Math.min(...bigArray) — spreading 100K+ items overflows the
@@ -1882,7 +2103,12 @@
 
         buildHistogram();
         applyFilters();
-      } catch(_) {}
+      } catch(_) {
+        // Network/parse failure — dismiss the spinner and fall back to the empty
+        // state rather than leaving the boot spinner forever.
+        state.assetsLoaded = true;
+        renderGrid();
+      }
     }
 
     // ── Histogram ──
@@ -1978,12 +2204,14 @@
       const wrap = document.getElementById('photoGridWrap');
       const grid = document.getElementById('photoGrid');
       const empty = document.getElementById('libraryEmpty');
+      const loading = document.getElementById('libraryLoading');
+      if (loading) loading.style.display = 'none';
 
       if (!state.filtered.length) {
         grid.innerHTML = '';
         grid.style.height = '0px';
         vgrid.rendered.clear(); vgrid.headers.clear(); vgrid.groups = [];
-        empty.style.display = 'flex';
+        if (state.assetsLoaded) empty.style.display = 'flex';
         document.getElementById('floatingMonth').classList.remove('show');
         return;
       }
@@ -2545,6 +2773,21 @@
     });
 
     // ── Lightbox ──
+    // Preload cache: keyed by asset id, value is the Image object (may still be loading).
+    const lbPreloadCache = new Map();
+    const LB_PRELOAD_LIMIT = 12; // max cached images
+
+    function lbPreload(item) {
+      if (!item || item.kind === 'video' || lbPreloadCache.has(item.id)) return;
+      if (lbPreloadCache.size >= LB_PRELOAD_LIMIT) {
+        // evict the oldest entry
+        lbPreloadCache.delete(lbPreloadCache.keys().next().value);
+      }
+      const pre = new Image();
+      pre.src = thumbUrl(item.id, 'full');
+      lbPreloadCache.set(item.id, pre);
+    }
+
     function openLightbox(idx) {
       const item = state.lightboxItems[idx];
       if (!item) return;
@@ -2571,11 +2814,30 @@
       } else {
         vid.style.display = 'none'; vid.pause(); vid.src = '';
         img.style.display = 'block';
-        // Show the cached grid thumb instantly, then swap to the full uncropped image
-        img.src = thumbUrl(item.id, 'grid');
-        const full = new Image();
-        full.onload = () => { if (state.lightboxIdx === idx) img.src = full.src; };
-        full.src = thumbUrl(item.id, 'full');
+        const cached = lbPreloadCache.get(item.id);
+        if (cached && cached.complete && cached.naturalWidth) {
+          // Already preloaded — show full image immediately, no thumb flash
+          img.src = cached.src;
+        } else {
+          // Show the grid thumb instantly while the full image loads
+          img.src = thumbUrl(item.id, 'grid');
+          const full = cached || new Image();
+          if (!cached) {
+            full.src = thumbUrl(item.id, 'full');
+            lbPreloadCache.set(item.id, full);
+          }
+          const swap = () => { if (state.lightboxIdx === idx) img.src = full.src; };
+          full.onload = swap;
+          // Guard the race where a preloaded image completed between the .complete
+          // check above and now — onload won't fire for an already-loaded image,
+          // which would otherwise leave the lightbox stuck on the grid thumb.
+          if (full.complete && full.naturalWidth) swap();
+        }
+        // Preload neighbours so navigating is instant
+        for (let d = 1; d <= 2; d++) {
+          lbPreload(state.lightboxItems[idx - d]);
+          lbPreload(state.lightboxItems[idx + d]);
+        }
       }
 
       // Live Photo: offer the LIVE affordance on stills that have a motion clip
@@ -2871,6 +3133,12 @@
           rows.push(row('Coordinates', `${a.gps_lat.toFixed(5)}, ${a.gps_lon.toFixed(5)}`, true));
         }
 
+        // Natural-language caption (read-only) — generated by the captioning worker
+        if (a.caption) {
+          rows.push(sect('Description'));
+          rows.push(`<div class="meta-caption">${escapeHtml(a.caption)}</div>`);
+        }
+
         // Tags section (interactive — populated after innerHTML is set)
         rows.push(sect('Tags'));
         rows.push('<div class="meta-tags" id="metaTags"></div>');
@@ -3047,7 +3315,11 @@
     async function loadPlaces() {
       try {
         await renderWorldMap();
-        const places = await fetch('/api/aurora/places').then(r => r.json());
+        // hideRaw MUST be passed so pin counts match what the preview + View-all
+        // will actually return. Otherwise a RAW-only place reads "N photos" on the
+        // pin but its preview grid comes back empty.
+        const placesUrl = '/api/aurora/places' + (state.hideRaw ? '?hideRaw=1' : '');
+        const places = await fetch(placesUrl).then(r => r.json());
         document.getElementById('placesCount').textContent = places.length + ' locations';
         document.getElementById('navBadgePlaces').textContent = places.length;
 
@@ -3175,10 +3447,30 @@
 
         pin.style.left = (cx / w * 100) + '%';
         pin.style.top = (cy / h * 100) + '%';
-        pin.addEventListener('click', () => {
-          if (mapDragMoved) return;                 // ignore the click that ends a pan
-          showPlaceGallery(c.places, pin);          // single place OR a whole cluster
+        // Pin selection is bound to a per-pin pointerdown → pointerup pair with a
+        // small movement budget. This is DELIBERATE — it decouples pin clicks from
+        // the map's own drag/pan state so a stale mapDragMoved (e.g. left `true`
+        // after a pan then a tap) can never swallow the click. On touch, the tiny
+        // finger jitter that a bare `click` listener converts into a miss is
+        // ignored as long as the pointer stays within TAP_SLOP of the pin.
+        const TAP_SLOP = 8; // px
+        let dx = 0, dy = 0, downX = 0, downY = 0, downOK = false;
+        pin.addEventListener('pointerdown', (e) => {
+          downOK = true; downX = e.clientX; downY = e.clientY; dx = dy = 0;
+          e.stopPropagation();                       // don't let the map area steal it
         });
+        pin.addEventListener('pointermove', (e) => {
+          if (!downOK) return;
+          dx = e.clientX - downX; dy = e.clientY - downY;
+          if (Math.hypot(dx, dy) > TAP_SLOP) downOK = false;
+        });
+        pin.addEventListener('pointerup', (e) => {
+          if (!downOK) return;
+          downOK = false;
+          e.stopPropagation();
+          showPlaceGallery(c.places, pin);
+        });
+        pin.addEventListener('pointercancel', () => { downOK = false; });
         pins.appendChild(pin);
       }
     }
@@ -3222,10 +3514,17 @@
       let dragging = false, lastX = 0, lastY = 0, pinching = false;
       area.addEventListener('pointerdown', (e) => {
         if (pinching) return;
+        // Every fresh press resets the pan-vs-click sentinel — even if it lands on
+        // a pin. Historically it was only reset on the map's own drag branch, so a
+        // prior pan left mapDragMoved=true and the very next pin tap saw the pin's
+        // click handler abort silently. Kept globally reset here so pin selection
+        // (which now uses its own pointerup gate) is never affected by legacy
+        // callers that still consult mapDragMoved.
+        mapDragMoved = false;
         // Press starting on a pin must NOT start a pan — otherwise pointer capture
         // swallows the pin's click and the gallery never opens.
         if (e.target.closest('.place-pin')) return;
-        dragging = true; mapDragMoved = false;
+        dragging = true;
         lastX = e.clientX; lastY = e.clientY;
         try { area.setPointerCapture(e.pointerId); } catch (_) {}
         area.classList.add('grabbing');
@@ -3278,6 +3577,13 @@
     // Opens the place-detail panel for one place OR a whole cluster of places. Shows
     // a small preview strip plus a "View all" button that hands off to the Search
     // results page (filtered to this place), where the full set browses smoothly.
+    //
+    // Concurrency: rapid pin taps used to race — the slower fetch could clobber the
+    // panel that a newer click had already updated. `placeFetchCtrl` aborts the prior
+    // fetch on every new call, and `placeFetchSeq` guards the render so a late
+    // response for a superseded selection cannot overwrite the current one.
+    let placeFetchCtrl = null;
+    let placeFetchSeq = 0;
     async function showPlaceGallery(places, pinEl) {
       if (!places || !places.length) return;
       const detail = document.getElementById('placeDetail');
@@ -3307,8 +3613,18 @@
       btn.disabled = true; btn.textContent = 'View all photos →';
       grid.innerHTML = '<span style="font-size:11px;color:var(--text-faint)">Loading…</span>';
 
+      // Cancel the previous request so it can't clobber this one on the render side.
+      if (placeFetchCtrl) { try { placeFetchCtrl.abort(); } catch (_) {} }
+      placeFetchCtrl = new AbortController();
+      const mySeq = ++placeFetchSeq;
+
       try {
-        const res = await fetch(`/api/aurora/assets?place=${ids}&limit=12&count=1${state.hideRaw ? '&hideRaw=1' : ''}`).then(r => r.json());
+        const res = await fetch(
+          `/api/aurora/assets?place=${ids}&limit=12&count=1${state.hideRaw ? '&hideRaw=1' : ''}`,
+          { signal: placeFetchCtrl.signal }
+        ).then(r => r.json());
+        // Late response for a superseded click — drop it silently.
+        if (mySeq !== placeFetchSeq) return;
         const total = res.total != null ? res.total : res.assets.length;
         state.placeSelection.total = total;
         meta.textContent = `${total.toLocaleString()} ${total === 1 ? 'photo' : 'photos'}  ·  ${fmtDate(firstDate)} – ${fmtDate(lastDate)}`;
@@ -3336,7 +3652,13 @@
           tile.addEventListener('click', () => openLightbox(idx));
           grid.appendChild(tile);
         });
-      } catch(_) { grid.innerHTML = ''; meta.textContent = '—'; }
+      } catch (err) {
+        // AbortError = superseded by a later click; leave the panel alone.
+        if (err && err.name === 'AbortError') return;
+        if (mySeq !== placeFetchSeq) return;
+        grid.innerHTML = '<span style="font-size:11px;color:var(--text-faint)">Couldn’t load photos</span>';
+        meta.textContent = '—';
+      }
     }
 
     // "View all" → hand off to the Search results page, filtered to this place.
@@ -3348,11 +3670,54 @@
     // ── Search ── the unified results page (also used by Places "View all")
     const SEARCH_LIMIT = 500;
     let searchTimer = null, searchSeq = 0;
-    const searchState = { kind: '', camera: '', country: '', fav: false, placeIds: '', placeName: '', tag: '', tagName: '' };
+    const searchState = { kind: '', camera: '', country: '', fav: false, placeIds: '', placeName: '', tag: '', tagName: '', terms: [] };
+
+    // ── Search term chips ──
+    // Each Enter commits the current word as a removable chip; all chips are ANDed
+    // (strict intersection), e.g. "dog" + "cat" → only photos containing both.
+    function renderSearchChips() {
+      const el = document.getElementById('searchChips');
+      if (!el) return;
+      el.innerHTML = '';
+      for (const term of searchState.terms) {
+        const chip = document.createElement('span');
+        chip.className = 'search-term-chip';
+        const label = document.createElement('span');
+        label.textContent = term;
+        const x = document.createElement('button');
+        x.type = 'button'; x.textContent = '✕'; x.title = 'Remove';
+        x.addEventListener('click', () => removeSearchTerm(term));
+        chip.appendChild(label); chip.appendChild(x);
+        el.appendChild(chip);
+      }
+    }
+    function commitSearchTerm() {
+      const input = document.getElementById('searchInput');
+      const val = input.value.trim();
+      if (!val) return;
+      const lc = val.toLowerCase();
+      if (!searchState.terms.some(t => t.toLowerCase() === lc)) searchState.terms.push(val);
+      input.value = '';
+      renderSearchChips();
+      runSearch();
+    }
+    function removeSearchTerm(term) {
+      searchState.terms = searchState.terms.filter(t => t !== term);
+      renderSearchChips();
+      runSearch();
+    }
+    function clearSearchTerms() { searchState.terms = []; renderSearchChips(); }
 
     document.getElementById('searchInput').addEventListener('input', () => {
       clearTimeout(searchTimer);
       searchTimer = setTimeout(runSearch, 250);
+    });
+    document.getElementById('searchInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); clearTimeout(searchTimer); commitSearchTerm(); }
+      // Backspace on an empty box pops the last committed chip
+      else if (e.key === 'Backspace' && !e.target.value && searchState.terms.length) {
+        e.preventDefault(); searchState.terms.pop(); renderSearchChips(); runSearch();
+      }
     });
 
     // Kind chips behave like radio buttons ("All" = no kind filter).
@@ -3389,7 +3754,7 @@
     function searchPlace(ids, name) {
       searchState.placeIds = String(ids); searchState.placeName = name || 'Selected place';
       searchState.kind = ''; searchState.camera = ''; searchState.country = ''; searchState.fav = false; searchState.tag = ''; searchState.tagName = '';
-      const input = document.getElementById('searchInput'); if (input) input.value = '';
+      const input = document.getElementById('searchInput'); if (input) input.value = ''; clearSearchTerms();
       switchScreen('search');
     }
 
@@ -3397,54 +3762,72 @@
     function searchTag(tagId, name) {
       searchState.tag = String(tagId); searchState.tagName = name || '';
       searchState.kind = ''; searchState.camera = ''; searchState.country = ''; searchState.fav = false; searchState.placeIds = ''; searchState.placeName = '';
-      const input = document.getElementById('searchInput'); if (input) input.value = '';
+      const input = document.getElementById('searchInput'); if (input) input.value = ''; clearSearchTerms();
       closeMetaPanel();
       switchScreen('search');
     }
 
     async function loadSearch() {
-      // Reflect current state on the chips (so re-entering keeps selections)
+      // Reflect current state on the kind/fav chips (they're pre-rendered in the
+      // template — value-independent — so no fetch needed).
       document.querySelectorAll('[data-search-filter="kind"]').forEach(c => c.classList.toggle('active', c.dataset.val === searchState.kind));
       const fc = document.getElementById('favChip'); if (fc) fc.classList.toggle('active', searchState.fav);
-
-      const fillChips = (containerId, list, type, current) => {
-        const el = document.getElementById(containerId);
-        if (!el) return;
-        el.innerHTML = '';
-        if (!list.length) { el.innerHTML = '<span style="font-size:11px;color:var(--text-faint)">None</span>'; return; }
-        for (const c of list) {
-          const val = c[type];
-          const chip = document.createElement('span');
-          chip.className = 'chip' + (current === val ? ' active' : '');
-          chip.dataset.searchFilter = type;
-          chip.dataset.val = val;
-          chip.innerHTML = escapeHtml(val) + `<span class="chip-count">${(c.count || 0).toLocaleString()}</span>`;
-          chip.addEventListener('click', () => toggleSearchFilter(chip, type, val));
-          el.appendChild(chip);
-        }
-      };
-
-      try { fillChips('cameraChips', (await fetch('/api/aurora/cameras').then(r => r.json())).slice(0, 8), 'camera', searchState.camera); } catch (_) {}
-      try { fillChips('countryChips', (await fetch('/api/aurora/countries').then(r => r.json())).slice(0, 12), 'country', searchState.country); } catch (_) {}
-      // Tags facet — only shown once the library has tags (filter by id, show name)
-      try {
-        const tags = await fetch('/api/aurora/tags').then(r => r.json());
-        const sec = document.getElementById('tagFilterSection');
-        const el = document.getElementById('tagChips');
-        if (tags.length) {
-          sec.style.display = '';
-          el.innerHTML = '';
-          for (const t of tags.slice(0, 24)) {
-            const chip = document.createElement('span');
-            chip.className = 'chip' + (String(searchState.tag) === String(t.id) ? ' active' : '');
-            chip.innerHTML = escapeHtml(t.name) + `<span class="chip-count">${(t.count || 0).toLocaleString()}</span>`;
-            chip.addEventListener('click', () => toggleTagFilter(chip, t.id, t.name));
-            el.appendChild(chip);
-          }
-        } else sec.style.display = 'none';
-      } catch (_) {}
-
+      // The camera/country/tag chip lists are populated by runSearch()
+      // itself now — the /assets response carries a `facets` block that reflects
+      // the CURRENT result set. That means:
+      //  • the counts stay honest as filters narrow (no more "iPhone X · 16,000"
+      //    on a 30-result view — the classic reported bug), and
+      //  • we save three extra HTTP roundtrips on screen entry.
       runSearch();
+    }
+
+    // ── Facet chip rendering (called from runSearch on every response) ─────
+    // Rebuild the chip DOM so counts always match the current result set. Order
+    // matters (highest count first, from the server). If the currently-active
+    // value isn't in the top-N slice, we prepend a synthetic entry pinned to
+    // the search total — otherwise the user's own selection would vanish.
+    function renderFacetChips(containerId, sectionId, list, keyField, activeVal, activeName, onClick) {
+      const el = document.getElementById(containerId);
+      if (!el) return;
+      const sec = sectionId ? document.getElementById(sectionId) : null;
+      const items = list ? [...list] : [];
+      if (activeVal !== '' && activeVal != null && !items.some(f => String(f[keyField]) === String(activeVal))) {
+        // For tag chips the active chip needs a display name (server sent only
+        // top-N so this one might not be in the response). We fall back to the
+        // searchState.tagName captured when the chip was clicked.
+        const synth = { [keyField]: activeVal, count: 0 };
+        if (activeName) synth.name = activeName;
+        items.unshift(synth);
+      }
+      // Section with dynamic visibility (tags): hide when the list is empty
+      // AND nothing is active — otherwise the user just narrowed away all
+      // matches but is still in "tag:X" mode, keep the section open.
+      if (sec) sec.style.display = (items.length || activeVal) ? '' : 'none';
+      if (!items.length) { el.innerHTML = '<span style="font-size:11px;color:var(--text-faint)">None</span>'; return; }
+      el.innerHTML = '';
+      for (const c of items) {
+        const val = c[keyField];
+        const label = c.name != null ? c.name : val;
+        const chip = document.createElement('span');
+        chip.className = 'chip' + (String(activeVal) === String(val) ? ' active' : '');
+        chip.dataset.val = val;
+        chip.innerHTML = escapeHtml(String(label)) + `<span class="chip-count">${(c.count || 0).toLocaleString()}</span>`;
+        chip.addEventListener('click', () => onClick(chip, c));
+        el.appendChild(chip);
+      }
+    }
+
+    function applyFacets(facets) {
+      if (!facets) return;
+      renderFacetChips('cameraChips', null, facets.cameras, 'camera',
+        searchState.camera, null,
+        (chip, c) => toggleSearchFilter(chip, 'camera', c.camera));
+      renderFacetChips('countryChips', null, facets.countries, 'country',
+        searchState.country, null,
+        (chip, c) => toggleSearchFilter(chip, 'country', c.country));
+      renderFacetChips('tagChips', 'tagFilterSection', facets.tags, 'id',
+        searchState.tag, searchState.tagName,
+        (chip, t) => toggleTagFilter(chip, t.id, t.name));
     }
 
     function toggleTagFilter(el, id, name) {
@@ -3471,16 +3854,111 @@
       document.getElementById('searchFilterCount').textContent = n;
     }
 
+    // ── Virtualized search results grid ──
+    // Search can return hundreds of results; rendering them all at once made
+    // iPhone scrolling laggy/jumpy. This renders only the on-screen tiles (plus a
+    // small buffer) and recycles them on scroll — same approach as the library.
+    const svgrid = { items: [], cols: 1, cellW: 0, rowH: 0, gap: 4, rendered: new Map(),
+                     totalRows: 0, gridOffset: 0, lastScrollTop: 0, rafPending: false };
+
+    function searchResetGrid() {
+      const grid = document.getElementById('searchGrid');
+      svgrid.items = []; svgrid.rendered.clear();
+      grid.innerHTML = ''; grid.style.height = ''; grid.classList.remove('virtual');
+    }
+
+    function searchComputeLayout() {
+      const grid = document.getElementById('searchGrid');
+      const scroller = document.getElementById('searchResults');
+      if (!grid || !scroller) return;
+      const contentW = grid.clientWidth || (scroller.clientWidth - 40);
+      const isMobile = window.matchMedia('(max-width: 760px)').matches;
+      let cols;
+      if (isMobile) cols = contentW < 360 ? 3 : contentW < 560 ? 4 : 5;
+      else cols = Math.max(1, Math.floor((contentW + svgrid.gap) / (state.tileSize + svgrid.gap)));
+      svgrid.cols = Math.max(1, cols);
+      svgrid.cellW = Math.floor((contentW - (svgrid.cols - 1) * svgrid.gap) / svgrid.cols);
+      svgrid.rowH = svgrid.cellW + svgrid.gap;
+      svgrid.totalRows = Math.ceil(svgrid.items.length / svgrid.cols);
+      grid.style.height = (svgrid.totalRows * svgrid.rowH) + 'px';
+      // grid top expressed in the scroller's content coordinates (header sits above)
+      svgrid.gridOffset = grid.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+    }
+
+    function searchPaintWindow() {
+      const grid = document.getElementById('searchGrid');
+      const scroller = document.getElementById('searchResults');
+      if (!grid || !scroller || !svgrid.items.length) return;
+      const scrollTop = scroller.scrollTop, viewH = scroller.clientHeight;
+      const { cols, cellW, rowH, gap, gridOffset } = svgrid;
+      const dir = scrollTop >= svgrid.lastScrollTop ? 1 : -1;
+      svgrid.lastScrollTop = scrollTop;
+      const ahead = viewH * 1.6, behind = viewH * 0.7;
+      const winTop = scrollTop - gridOffset;
+      const top = winTop - (dir > 0 ? behind : ahead);
+      const bot = winTop + viewH + (dir > 0 ? ahead : behind);
+      const rTop = Math.max(0, Math.floor(top / rowH));
+      const rBot = Math.min(svgrid.totalRows - 1, Math.floor(bot / rowH));
+      const want = new Set();
+      for (let r = rTop; r <= rBot; r++) {
+        for (let c = 0; c < cols; c++) {
+          const idx = r * cols + c;
+          if (idx >= svgrid.items.length) break;
+          want.add(idx);
+          if (!svgrid.rendered.has(idx)) {
+            const tile = makeTile(svgrid.items[idx], idx, true); // immediate=true → load thumb now
+            tile.style.left = (c * (cellW + gap)) + 'px';
+            tile.style.top = (r * rowH) + 'px';
+            tile.style.width = cellW + 'px';
+            grid.appendChild(tile);
+            svgrid.rendered.set(idx, tile);
+          }
+        }
+      }
+      for (const [idx, el] of svgrid.rendered) if (!want.has(idx)) { el.remove(); svgrid.rendered.delete(idx); }
+    }
+
+    function searchSchedulePaint() {
+      if (svgrid.rafPending) return;
+      svgrid.rafPending = true;
+      requestAnimationFrame(() => { svgrid.rafPending = false; searchPaintWindow(); });
+    }
+
+    function searchRenderResults(items) {
+      const grid = document.getElementById('searchGrid');
+      const scroller = document.getElementById('searchResults');
+      svgrid.items = items; svgrid.rendered.clear();
+      grid.classList.add('virtual');
+      grid.innerHTML = '';
+      if (scroller) scroller.scrollTop = 0;
+      svgrid.lastScrollTop = 0;
+      searchComputeLayout();
+      searchPaintWindow();
+    }
+
+    document.getElementById('searchResults').addEventListener('scroll', searchSchedulePaint, { passive: true });
+    window.addEventListener('resize', () => {
+      if (svgrid.items.length && document.getElementById('screen-search').classList.contains('active')) {
+        searchComputeLayout(); searchPaintWindow();
+      }
+    });
+
     async function runSearch() {
       const icon = document.getElementById('searchIcon');
-      const q = document.getElementById('searchInput').value.trim();
+      // Effective query = committed chips + whatever's being typed (live preview).
+      const typed = document.getElementById('searchInput').value.trim();
+      const terms = [...searchState.terms];
+      if (typed) terms.push(typed);
+      const q = terms.join(' ');
       updateFilterToggleBadge();
 
-      const params = new URLSearchParams({ limit: SEARCH_LIMIT, count: '1' });
+      const params = new URLSearchParams({ limit: SEARCH_LIMIT, count: '1', facets: '1' });
       if (state.hiddenMode) {
         params.set('showHidden', '1');
       } else {
         if (q) params.set('q', q);
+        // Committed chips mean an EXACT intersection (no OR/typo widening).
+        if (searchState.terms.length) params.set('strict', '1');
         if (searchState.kind) params.set('kind', searchState.kind);
         if (searchState.camera) params.set('camera', searchState.camera);
         if (searchState.country) params.set('country', searchState.country);
@@ -3498,17 +3976,21 @@
       } else pf.style.display = 'none';
 
       const seq = ++searchSeq;
+      // Cancel any in-flight prior fetch. Historically only a seq guard was
+      // used, so a stale fetch STILL executed on the server — two rapid
+      // Enter-presses raced on the facet TEMP table and returned corrupt
+      // data. Aborting closes the connection so the server work stops too.
+      if (window.__searchCtrl) { try { window.__searchCtrl.abort(); } catch (_) {} }
+      window.__searchCtrl = new AbortController();
       icon.classList.add('busy');
       try {
-        const res = await fetch('/api/aurora/assets?' + params).then(r => r.json());
+        const res = await fetch('/api/aurora/assets?' + params, { signal: window.__searchCtrl.signal }).then(r => r.json());
         if (seq !== searchSeq) return; // superseded by a newer keystroke
 
-        const grid = document.getElementById('searchGrid');
         const empty = document.getElementById('searchEmpty');
         const header = document.getElementById('searchHeader');
         const cnt = document.getElementById('searchResultsCount');
         const corr = document.getElementById('searchCorrected');
-        grid.innerHTML = '';
 
         const items = res.assets || [];
         const total = res.total != null ? res.total : items.length;
@@ -3523,14 +4005,24 @@
         else if (res.fuzzy && q) corr.innerHTML = `Closest matches for <b>${escapeHtml(q)}</b>`;
         else corr.textContent = '';
 
-        if (!items.length) { empty.style.display = 'flex'; state.selectList = []; return; }
+        // Update the sidebar chip counts to match this result set. Even on 0
+        // hits we call it — the facet arrays will be empty but the active-chip
+        // synthesis inside renderFacetChips keeps the user's own selection
+        // visible so they can undo it.
+        applyFacets(res.facets);
+        updateFilterToggleBadge();
+
+        if (!items.length) { searchResetGrid(); empty.style.display = 'flex'; state.selectList = []; return; }
         empty.style.display = 'none';
 
         state.lightboxItems = items;
         state.selectList = items;
-        items.forEach((item, idx) => grid.appendChild(makeTile(item, idx)));
-        lazyLoad();
-      } catch (_) {
+        // Virtualized render — only on-screen tiles are built (smooth on mobile)
+        searchRenderResults(items);
+      } catch (err) {
+        // Aborted by a newer keystroke — that fetch will report its own
+        // outcome. Leave the panel alone.
+        if (err && err.name === 'AbortError') return;
         if (seq === searchSeq) document.getElementById('searchResultsCount').textContent = 'Search failed — try again';
       } finally {
         if (seq === searchSeq) icon.classList.remove('busy');
@@ -3860,11 +4352,209 @@
       });
       if (tab === 'privacy') loadPrivacyStats();
       if (tab === 'system') loadUpdateVersion();
+      if (tab === 'manage') loadCaptions(); else stopCaptionPolling();
+      if (tab === 'users') { loadUsers(); loadRoles(); }
+      if (tab === 'audit') loadAudit();
+    }
+
+    // ── Photo captioning control panel (start/stop + config + live monitor) ──
+    let _captionPoll = null;
+    let _capConfigLoaded = false;
+
+    function capRelTime(ts) {
+      if (!ts) return '';
+      const s = Math.round((Date.now() - ts) / 1000);
+      if (s < 5) return 'just now';
+      if (s < 60) return s + 's ago';
+      if (s < 3600) return Math.floor(s / 60) + 'm ago';
+      return Math.floor(s / 3600) + 'h ago';
+    }
+
+    function renderCaptionState(s) {
+      const startBtn = document.getElementById('capStartBtn');
+      const stopBtn = document.getElementById('capStopBtn');
+      if (!startBtn) return;
+      const running = !!s.running;
+      const stopping = s.phase === 'stopping';
+      startBtn.style.display = running ? 'none' : '';
+      stopBtn.style.display = running ? '' : 'none';
+      startBtn.disabled = stopping;                 // can't restart mid-drain
+      startBtn.textContent = stopping ? 'Stopping…' : (s.captioned && s.captioned > 0) ? 'Resume' : 'Start';
+
+      // Progress bar — cumulative captioned / total
+      const total = s.total || 0, captioned = s.captioned || 0;
+      const pct = total ? Math.round((captioned / total) * 100) : 0;
+      const prog = document.getElementById('capProgress');
+      prog.style.display = total ? 'block' : 'none';
+      document.getElementById('capProgressBar').style.width = pct + '%';
+      const sessionTxt = running && s.done ? ` · ${s.done.toLocaleString()} this run` : '';
+      document.getElementById('capProgressLabel').textContent =
+        `${captioned.toLocaleString()} / ${total.toLocaleString()} described (${pct}%)${sessionTxt}`;
+
+      // Status line
+      const status = document.getElementById('capStatus');
+      const phaseTxt = {
+        running: 'Running…', starting: 'Starting…', stopping: 'Stopping…', paused: 'Paused (import running)',
+        complete: '✓ All photos described', stopped: 'Stopped', error: 'Error', idle: '',
+      }[s.phase] || '';
+      status.textContent = s.phase === 'error' ? ('Error — ' + (s.error || 'see logs')) : phaseTxt;
+      status.style.color = s.phase === 'complete' ? '#4ade80'
+        : s.phase === 'error' ? '#f87171'
+        : running ? 'var(--accent-sky)' : 'var(--text-muted)';
+
+      // Live monitor — last image preview + recent activity log
+      const monitor = document.getElementById('capMonitor');
+      const hasActivity = (s.last && s.last.assetId) || (s.log && s.log.length);
+      monitor.style.display = hasActivity ? 'block' : 'none';
+      if (s.last && s.last.assetId) {
+        const img = document.getElementById('capLastThumb');
+        const want = `/api/aurora/thumb/${s.last.assetId}?size=grid`;
+        if (img.getAttribute('data-id') !== String(s.last.assetId)) {
+          img.src = want; img.setAttribute('data-id', String(s.last.assetId));
+        }
+        document.getElementById('capLastCap').textContent = s.last.caption || '';
+        document.getElementById('capLastMeta').textContent =
+          `#${s.last.assetId} · ${capRelTime(s.last.at)}`;
+      }
+      const logEl = document.getElementById('capLog');
+      if (logEl) {
+        logEl.innerHTML = '';
+        for (const e of (s.log || [])) {
+          const row = document.createElement('div');
+          row.className = 'cap-log-row';
+          const img = document.createElement('img');
+          img.className = 'cap-log-thumb'; img.loading = 'lazy';
+          img.src = `/api/aurora/thumb/${e.assetId}?size=grid`;
+          const cap = document.createElement('div');
+          cap.className = 'cap-log-cap' + (e.ok ? '' : (e.skipped ? ' skip' : ' err'));
+          cap.textContent = e.ok ? (e.caption || '') : ((e.skipped ? '⊘ ' : '✕ ') + (e.error || 'failed'));
+          cap.title = cap.textContent;
+          const time = document.createElement('div');
+          time.className = 'cap-log-time'; time.textContent = capRelTime(e.at);
+          row.append(img, cap, time);
+          logEl.appendChild(row);
+        }
+      }
+    }
+
+    async function loadCaptions() {
+      if (!_capConfigLoaded) { await capLoadConfig(); _capConfigLoaded = true; }
+      try { renderCaptionState(await fetch('/api/aurora/captions/status').then(r => r.json())); } catch (_) {}
+      if (_captionPoll) return;
+      _captionPoll = setInterval(async () => {
+        try { renderCaptionState(await fetch('/api/aurora/captions/status').then(r => r.json())); } catch (_) {}
+      }, 2500);
+    }
+    function stopCaptionPolling() { if (_captionPoll) { clearInterval(_captionPoll); _captionPoll = null; } }
+
+    async function capStart(btn) {
+      btn.disabled = true;
+      try { renderCaptionState(await fetch('/api/aurora/captions/status').then(r => r.json())); } catch (_) {}
+      try { await fetch('/api/aurora/captions/start', { method: 'POST' }); } catch (_) {}
+      btn.disabled = false;
+      loadCaptions();
+    }
+    async function capStop(btn) {
+      btn.disabled = true;
+      try { await fetch('/api/aurora/captions/stop', { method: 'POST' }); } catch (_) {}
+      btn.disabled = false;
+      try { renderCaptionState(await fetch('/api/aurora/captions/status').then(r => r.json())); } catch (_) {}
+    }
+
+    // ── Config: populate fields, test connection, save ──
+    function capFillModelSelect(models, selected) {
+      const sel = document.getElementById('capModel');
+      if (!sel) return;
+      const cur = selected || sel.value;
+      sel.innerHTML = '';
+      const list = (models && models.length) ? models : (cur ? [{ name: cur, vision: true }] : []);
+      // vision models first
+      list.sort((a, b) => (b.vision === a.vision) ? 0 : (b.vision ? 1 : -1));
+      for (const m of list) {
+        const o = document.createElement('option');
+        o.value = m.name;
+        o.textContent = m.name + (m.vision ? '' : ' (no vision)') + (m.params ? ` · ${m.params}` : '');
+        if (m.name === cur) o.selected = true;
+        sel.appendChild(o);
+      }
+      if (cur && !list.some(m => m.name === cur)) {
+        const o = document.createElement('option');
+        o.value = cur; o.textContent = cur; o.selected = true;
+        sel.insertBefore(o, sel.firstChild);
+      }
+    }
+
+    async function capLoadConfig() {
+      try {
+        const cfg = await fetch('/api/aurora/captions/config').then(r => r.json());
+        document.getElementById('capUrl').value = cfg.url || '';
+        document.getElementById('capConc').value = String(cfg.concurrency || 1);
+        const styleSel = document.getElementById('capStyle');
+        styleSel.innerHTML = '';
+        for (const st of (cfg.styles || [])) {
+          const o = document.createElement('option');
+          o.value = st.key; o.textContent = st.label;
+          if (st.key === cfg.style) o.selected = true;
+          styleSel.appendChild(o);
+        }
+        capFillModelSelect(null, cfg.model);
+        // best-effort: fetch live model list from the saved server
+        capTestConnection(null, true);
+      } catch (_) {}
+    }
+
+    async function capTestConnection(btn, quiet) {
+      const hint = document.getElementById('capModelHint');
+      const url = document.getElementById('capUrl').value.trim();
+      if (btn) btn.disabled = true;
+      if (!quiet && hint) { hint.textContent = 'Testing…'; hint.style.color = 'var(--text-faint)'; }
+      try {
+        const r = await fetch('/api/aurora/captions/models?url=' + encodeURIComponent(url)).then(r => r.json());
+        if (r.ok) {
+          const vis = r.models.filter(m => m.vision).length;
+          capFillModelSelect(r.models, document.getElementById('capModel').value);
+          if (hint) { hint.textContent = `✓ Connected · ${r.models.length} models (${vis} vision)`; hint.style.color = '#4ade80'; }
+        } else {
+          if (hint) { hint.textContent = '✕ ' + (r.error || 'unreachable'); hint.style.color = '#f87171'; }
+        }
+      } catch (e) {
+        if (hint) { hint.textContent = '✕ ' + (e.message || 'failed'); hint.style.color = '#f87171'; }
+      }
+      if (btn) btn.disabled = false;
+    }
+
+    async function capSaveConfig(btn) {
+      const st = document.getElementById('capSaveStatus');
+      btn.disabled = true; st.textContent = 'Saving…'; st.style.color = 'var(--text-muted)';
+      const body = {
+        url: document.getElementById('capUrl').value.trim(),
+        model: document.getElementById('capModel').value,
+        style: document.getElementById('capStyle').value,
+        concurrency: parseInt(document.getElementById('capConc').value) || 1,
+      };
+      try {
+        await fetch('/api/aurora/captions/config', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        st.textContent = '✓ Saved'; st.style.color = '#4ade80';
+      } catch (_) {
+        st.textContent = '✕ Failed'; st.style.color = '#f87171';
+      }
+      btn.disabled = false;
+      setTimeout(() => { st.textContent = ''; }, 2500);
     }
 
     // ── Settings ──
     async function loadSettings(btn) {
       const done = btnBusy(btn, 'Refreshing…');
+      // If the current active sub-tab is hidden for this user, jump to the
+      // first visible one so they don't land on an empty screen.
+      const activeTab = document.querySelector('.settings-tabs .stab.active');
+      if (activeTab && activeTab.offsetParent === null) {
+        const firstVisible = [].slice.call(document.querySelectorAll('.settings-tabs .stab'))
+          .find(b => b.offsetParent !== null);
+        if (firstVisible) switchSettingsTab(firstVisible);
+      }
       loadMounts();
       loadTagManager();
       const rawCb = document.getElementById('toggleHideRaw');
@@ -4050,7 +4740,22 @@
       setActionStatus('Re-linking Live Photos…');
       try {
         const r = await fetch('/api/aurora/settings/relink-live', { method: 'POST' }).then(r => r.json());
-        setActionStatus(`✓ Linked ${(r.linked || 0).toLocaleString()} Live Photos.`, 'ok');
+        const linked = (r.linked || 0).toLocaleString();
+        const cleared = r.cleared || 0;
+        const rejected = r.rejectedByTime || 0;
+        // Two parts of the story deserve surfacing:
+        // - cleared: pairs undone from the prior DB state (only nonzero on the
+        //   first run after a bad-pairing algorithm was replaced; 0 on repeat
+        //   clicks because the algorithm is deterministic).
+        // - rejectedByTime: name-matches whose still/clip capture times are >5s
+        //   apart (iOS filename recycling — e.g. IMG_1190.jpg from 2019 + a MOV
+        //   with the same base name from 2021). Reported every run so the user
+        //   can see the timestamp gate is doing something.
+        const bits = [];
+        if (cleared > 0) bits.push(`unlinked ${cleared.toLocaleString()} stale pair${cleared === 1 ? '' : 's'}`);
+        if (rejected > 0) bits.push(`skipped ${rejected.toLocaleString()} timestamp mismatch${rejected === 1 ? '' : 'es'}`);
+        const suffix = bits.length ? '  (' + bits.join(', ') + ')' : '';
+        setActionStatus(`✓ Linked ${linked} Live Photos.${suffix}`, 'ok');
         done('Done ✓');
         loadStats(); loadIndex();
       } catch (e) { setActionStatus('Failed: ' + e.message, 'err'); done(); }
@@ -4313,6 +5018,31 @@
 
     let _dupPoll = null;
 
+    // Re-encoded / Live Photo copies: same photo saved twice at different
+    // compression. Server groups by metadata signature and auto-resolves, always
+    // keeping the Live Photo copy. Fast (pure DB), so no progress polling needed.
+    async function startSimilarScan() {
+      const btn = document.getElementById('dupSimilarBtn');
+      const statusEl = document.getElementById('dupSimilarStatus');
+      btn.disabled = true; btn.textContent = 'Scanning…';
+      statusEl.textContent = 'Looking for re-encoded copies…'; statusEl.style.color = 'var(--text-muted)';
+      try {
+        const r = await fetch('/api/aurora/settings/duplicates/scan-similar', { method: 'POST' }).then(r => r.json());
+        if (r.error) throw new Error(r.error);
+        if (!r.removed) {
+          statusEl.textContent = '✓ No re-encoded copies found'; statusEl.style.color = '#4ade80';
+        } else {
+          statusEl.textContent = `✓ Hid ${(r.removed || 0).toLocaleString()} re-encoded ${r.removed === 1 ? 'copy' : 'copies'} across ${(r.groups || 0).toLocaleString()} ${r.groups === 1 ? 'photo' : 'photos'}`;
+          statusEl.style.color = '#4ade80';
+          loadStats(); loadIndex(); // refresh library now that copies are hidden
+        }
+      } catch (err) {
+        statusEl.textContent = 'Scan failed — ' + err.message; statusEl.style.color = '#f87171';
+      } finally {
+        btn.disabled = false; btn.textContent = 'Find re-encoded copies';
+      }
+    }
+
     async function startDupScan() {
       const btn = document.getElementById('dupScanBtn');
       const statusEl = document.getElementById('dupScanStatus');
@@ -4520,8 +5250,308 @@
       });
     }
 
+    // ── RBAC / auth (client side) ──────────────────────────────────────
+    // Fetched once on boot. Server enforces every permission; this state only
+    // decides what to show in the UI.
+    window.AURORA_ME = null;
+    function havePerm(key) {
+      return !!(window.AURORA_ME && window.AURORA_ME.permissions && window.AURORA_ME.permissions.indexOf(key) >= 0);
+    }
+    async function loadMe() {
+      try {
+        const r = await fetch('/api/aurora/auth/me');
+        if (!r.ok) return;
+        window.AURORA_ME = await r.json();
+        applyPermissionsToUI();
+        renderUserChip();
+      } catch (_) {}
+      finally {
+        // Always drop the pre-load cloak, even if /me failed — otherwise nothing
+        // with data-perm* would ever become visible.
+        document.body.classList.add('perms-ready');
+      }
+    }
+    function applyPermissionsToUI() {
+      const isAdmin = havePerm('users.manage');
+      document.querySelectorAll('.admin-only').forEach(el => { el.style.display = isAdmin ? '' : 'none'; });
+      // Elements can opt-in with data-perm="photos.hidden" (single) or
+      // data-perm-any="settings.view users.manage" (any-of).
+      document.querySelectorAll('[data-perm]').forEach(el => {
+        el.style.display = havePerm(el.dataset.perm) ? '' : 'none';
+      });
+      document.querySelectorAll('[data-perm-any]').forEach(el => {
+        const perms = String(el.dataset.permAny || '').split(/\s+/).filter(Boolean);
+        el.style.display = perms.some(havePerm) ? '' : 'none';
+      });
+    }
+    // Any 401 from the API means the session expired — bounce to /login. Wrap
+    // fetch once so we don't have to touch every call site.
+    (function wrapFetchFor401() {
+      const orig = window.fetch;
+      window.fetch = function (input, init) {
+        return orig(input, init).then(res => {
+          if (res.status === 401 && String((input && input.url) || input || '').indexOf('/api/aurora/') >= 0
+              && location.pathname === '/aurora') {
+            location.replace('/login?next=' + encodeURIComponent(location.pathname));
+          }
+          return res;
+        });
+      };
+    })();
+
+    function renderUserChip() {
+      const me = window.AURORA_ME;
+      if (!me) return;
+      // Insert the chip into the topbar of whichever screen is showing one.
+      // The main app screens all have a .topbar element with room on the right.
+      document.querySelectorAll('.topbar').forEach(bar => {
+        if (bar.querySelector('.user-chip')) return;
+        const chip = document.createElement('button');
+        chip.className = 'user-chip';
+        chip.title = 'Signed in as ' + me.username + ' (' + me.role + ')';
+        chip.innerHTML = '<span>👤</span><span>' + escapeHtml(me.username) + '</span>';
+        chip.onclick = toggleUserMenu;
+        bar.appendChild(chip);
+      });
+      const menu = document.getElementById('userMenu');
+      menu.innerHTML =
+        '<div class="row head">' + escapeHtml(me.username) + ' · ' + escapeHtml(me.role) + '</div>' +
+        '<div class="row" onclick="doLogout()">Sign out</div>';
+    }
+    function toggleUserMenu(e) {
+      const menu = document.getElementById('userMenu');
+      menu.classList.toggle('show');
+      e && e.stopPropagation();
+    }
+    document.addEventListener('click', function () {
+      const m = document.getElementById('userMenu'); if (m) m.classList.remove('show');
+    });
+    async function doLogout() {
+      try { await fetch('/api/aurora/auth/logout', { method: 'POST' }); } catch (_) {}
+      location.replace('/login');
+    }
+    function escapeHtml(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+        ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+    }
+
+    // ── Users tab ──────────────────────────────────────────────────────
+    async function loadUsers() {
+      const r = await fetch('/api/aurora/auth/admin/users');
+      if (!r.ok) return;
+      const { users } = await r.json();
+      const tbody = document.querySelector('#usersTable tbody');
+      const rolesRes = await fetch('/api/aurora/auth/admin/roles');
+      const { roles } = rolesRes.ok ? await rolesRes.json() : { roles: [] };
+      tbody.innerHTML = users.map(u => {
+        const roleOptions = roles.map(r => `<option value="${escapeHtml(r.name)}"${r.name===u.role_name?' selected':''}>${escapeHtml(r.name)}</option>`).join('');
+        const badge = u.role_name === 'admin' ? 'admin' : u.role_name === 'user' ? 'user' : 'custom';
+        const last = u.last_seen_at ? new Date(u.last_seen_at).toLocaleString() : '—';
+        return `<tr>
+          <td>${escapeHtml(u.username)}</td>
+          <td><select onchange="setUserRole(${u.id}, this.value)">${roleOptions}</select> <span class="rbac-badge ${badge}">${escapeHtml(u.role_name)}</span></td>
+          <td>${u.disabled ? '<span class="rbac-badge disabled">disabled</span>' : '<span class="muted">active</span>'}</td>
+          <td class="muted">${last}</td>
+          <td><div class="rbac-row-actions">
+            <button class="btn btn-ghost" onclick="resetUserPin(${u.id}, '${escapeHtml(u.username)}')">Reset PIN</button>
+            <button class="btn btn-ghost" onclick="toggleUserDisabled(${u.id}, ${u.disabled ? 0 : 1})">${u.disabled ? 'Enable' : 'Disable'}</button>
+            <button class="btn btn-ghost" onclick="deleteUser(${u.id}, '${escapeHtml(u.username)}')" style="color:#f87171;">Delete</button>
+          </div></td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="5" class="muted">No users yet.</td></tr>';
+    }
+    async function setUserRole(id, role) {
+      const r = await fetch('/api/aurora/auth/admin/users/' + id + '/role', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role }),
+      });
+      if (!r.ok) { const b = await r.json().catch(() => ({})); toast(b.error || 'Failed'); }
+      loadUsers();
+    }
+    async function toggleUserDisabled(id, disabled) {
+      const r = await fetch('/api/aurora/auth/admin/users/' + id + '/disabled', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ disabled: !!disabled }),
+      });
+      if (!r.ok) { const b = await r.json().catch(() => ({})); toast(b.error || 'Failed'); }
+      loadUsers();
+    }
+    async function deleteUser(id, name) {
+      if (!confirm(`Delete user "${name}"? This cannot be undone.`)) return;
+      const r = await fetch('/api/aurora/auth/admin/users/' + id, { method: 'DELETE' });
+      if (!r.ok) { const b = await r.json().catch(() => ({})); toast(b.error || 'Failed'); return; }
+      loadUsers();
+    }
+    function resetUserPin(id, name) {
+      openRbacDialog(`
+        <h3>Reset PIN for ${escapeHtml(name)}</h3>
+        <label class="field">New 4-digit PIN</label>
+        <input type="text" id="rd_pin" maxlength="4" inputmode="numeric" pattern="\\d{4}" style="letter-spacing:12px;text-align:center;font-family:var(--font-mono);">
+        <div class="err" id="rd_err"></div>
+        <div class="actions">
+          <button class="btn btn-ghost" onclick="closeRbacDialog()">Cancel</button>
+          <button class="btn" onclick="submitResetPin(${id})">Reset</button>
+        </div>
+      `);
+      setTimeout(() => document.getElementById('rd_pin').focus(), 30);
+    }
+    async function submitResetPin(id) {
+      const pin = document.getElementById('rd_pin').value;
+      const r = await fetch('/api/aurora/auth/admin/users/' + id + '/pin', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin }),
+      });
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) return showRbacErr(b.error || 'Failed');
+      closeRbacDialog();
+      toast('PIN reset — other sessions signed out');
+      loadUsers();
+    }
+    function openUserAddDialog() {
+      // Roles come from the admin/roles call — fetch fresh so a just-created role appears.
+      fetch('/api/aurora/auth/admin/roles').then(r => r.json()).then(({ roles }) => {
+        const roleOpts = (roles || []).map(r => `<option value="${escapeHtml(r.name)}"${r.name==='user'?' selected':''}>${escapeHtml(r.name)}</option>`).join('');
+        openRbacDialog(`
+          <h3>Add user</h3>
+          <label class="field">Username</label>
+          <input type="text" id="rd_user" autocomplete="off" spellcheck="false">
+          <label class="field">4-digit PIN</label>
+          <input type="text" id="rd_pin" maxlength="4" inputmode="numeric" pattern="\\d{4}" style="letter-spacing:12px;text-align:center;font-family:var(--font-mono);">
+          <label class="field">Role</label>
+          <select id="rd_role">${roleOpts}</select>
+          <div class="err" id="rd_err"></div>
+          <div class="actions">
+            <button class="btn btn-ghost" onclick="closeRbacDialog()">Cancel</button>
+            <button class="btn" onclick="submitAddUser()">Create user</button>
+          </div>
+        `);
+        setTimeout(() => document.getElementById('rd_user').focus(), 30);
+      });
+    }
+    async function submitAddUser() {
+      const username = document.getElementById('rd_user').value.trim();
+      const pin = document.getElementById('rd_pin').value;
+      const role = document.getElementById('rd_role').value;
+      const r = await fetch('/api/aurora/auth/admin/users', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, pin, role }),
+      });
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) return showRbacErr(b.error || 'Failed');
+      closeRbacDialog();
+      toast('User created');
+      loadUsers();
+    }
+
+    // ── Roles tab ──────────────────────────────────────────────────────
+    async function loadRoles() {
+      const r = await fetch('/api/aurora/auth/admin/roles');
+      if (!r.ok) return;
+      const { roles, catalog } = await r.json();
+      window._rbacCatalog = catalog;
+      const tbody = document.querySelector('#rolesTable tbody');
+      tbody.innerHTML = roles.map(r => {
+        const badge = r.name === 'admin' ? 'admin' : r.name === 'user' ? 'user' : 'custom';
+        const perms = r.name === 'admin' ? 'All permissions' :
+          (r.permissions && r.permissions.length ? r.permissions.map(escapeHtml).join(', ') : '<span class="muted">None</span>');
+        const editable = !(r.is_builtin && r.name === 'admin');
+        return `<tr>
+          <td><span class="rbac-badge ${badge}">${escapeHtml(r.name)}</span></td>
+          <td class="muted">${r.is_builtin ? 'built-in' : 'custom'}</td>
+          <td style="font-size:12px;">${perms}</td>
+          <td><div class="rbac-row-actions">
+            ${editable ? `<button class="btn btn-ghost" onclick="openRoleDialog(${r.id})">Edit</button>` : ''}
+            ${!r.is_builtin ? `<button class="btn btn-ghost" onclick="deleteRole(${r.id}, '${escapeHtml(r.name)}')" style="color:#f87171;">Delete</button>` : ''}
+          </div></td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="4" class="muted">No roles.</td></tr>';
+    }
+    async function deleteRole(id, name) {
+      if (!confirm(`Delete role "${name}"?`)) return;
+      const r = await fetch('/api/aurora/auth/admin/roles/' + id, { method: 'DELETE' });
+      if (!r.ok) { const b = await r.json().catch(() => ({})); toast(b.error || 'Failed'); return; }
+      loadRoles();
+    }
+    async function openRoleDialog(id) {
+      // Load fresh so we always render against the latest catalog + current perms.
+      const listRes = await fetch('/api/aurora/auth/admin/roles');
+      const { roles, catalog } = await listRes.json();
+      const existing = id ? roles.find(r => r.id === id) : null;
+      const groups = {};
+      catalog.forEach(p => { (groups[p.group] = groups[p.group] || []).push(p); });
+      const permsHtml = Object.keys(groups).map(g => `
+        <div class="rbac-perm-group">
+          <h4>${escapeHtml(g)}</h4>
+          <div class="rbac-perm-list">
+            ${groups[g].map(p => {
+              const checked = existing && existing.permissions.indexOf(p.key) >= 0 ? ' checked' : '';
+              return `<label><input type="checkbox" data-perm="${escapeHtml(p.key)}"${checked}><span>${escapeHtml(p.label)} <span class="desc">(${escapeHtml(p.key)})</span></span></label>`;
+            }).join('')}
+          </div>
+        </div>`).join('');
+      openRbacDialog(`
+        <h3>${existing ? 'Edit role: ' + escapeHtml(existing.name) : 'New role'}</h3>
+        ${existing ? '' : '<label class="field">Name</label><input type="text" id="rd_name" autocomplete="off">'}
+        ${permsHtml}
+        <div class="err" id="rd_err"></div>
+        <div class="actions">
+          <button class="btn btn-ghost" onclick="closeRbacDialog()">Cancel</button>
+          <button class="btn" onclick="submitRole(${existing ? existing.id : 'null'})">${existing ? 'Save' : 'Create role'}</button>
+        </div>
+      `);
+    }
+    async function submitRole(id) {
+      const perms = [].slice.call(document.querySelectorAll('#rbacDialog input[data-perm]:checked')).map(el => el.dataset.perm);
+      const body = { permissions: perms };
+      if (!id) {
+        const nameEl = document.getElementById('rd_name');
+        body.name = nameEl ? nameEl.value.trim() : '';
+      }
+      const url = id ? '/api/aurora/auth/admin/roles/' + id : '/api/aurora/auth/admin/roles';
+      const r = await fetch(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) return showRbacErr(b.error || 'Failed');
+      closeRbacDialog();
+      loadRoles();
+      loadUsers();
+    }
+
+    // ── Audit log tab ──────────────────────────────────────────────────
+    async function loadAudit() {
+      const r = await fetch('/api/aurora/auth/admin/audit?limit=200');
+      if (!r.ok) return;
+      const { entries } = await r.json();
+      const tbody = document.querySelector('#auditTable tbody');
+      tbody.innerHTML = entries.map(e => `
+        <tr>
+          <td class="muted" style="white-space:nowrap;">${new Date(e.ts).toLocaleString()}</td>
+          <td>${escapeHtml(e.username || '—')}</td>
+          <td><code style="font-size:11px;">${escapeHtml(e.action)}</code></td>
+          <td class="muted">${escapeHtml(e.target || '')}</td>
+          <td class="muted" style="font-size:11px;max-width:280px;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(e.details || '')}</td>
+        </tr>`).join('') || '<tr><td colspan="5" class="muted">No entries.</td></tr>';
+    }
+
+    // ── RBAC dialog helpers ────────────────────────────────────────────
+    function openRbacDialog(html) {
+      document.getElementById('rbacDialog').innerHTML = html;
+      document.getElementById('rbacOverlay').style.display = 'flex';
+    }
+    function closeRbacDialog() {
+      document.getElementById('rbacOverlay').style.display = 'none';
+      document.getElementById('rbacDialog').innerHTML = '';
+    }
+    function showRbacErr(msg) {
+      const el = document.getElementById('rd_err');
+      if (el) { el.textContent = msg; el.classList.add('show'); }
+    }
+
     // ── Boot ──
     (async () => {
+      await loadMe();
       await loadStats();
       await loadIndex();
     })();

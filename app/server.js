@@ -13,8 +13,11 @@ const helmet = require('helmet');
 const compression = require('compression');
 
 const auroraRoutes = require('./src/routes/aurora');
+const authRoutes = require('./src/routes/authRoutes');
 const auroraDb = require('./src/services/auroraDbService');
 const auroraIndexer = require('./src/services/auroraIndexerService');
+const auroraAuth = require('./src/services/auroraAuthService');
+const { attachSession, requireAuth } = require('./src/middleware/auth');
 
 const PORT = parseInt(process.env.PORT, 10) || 8080;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -62,11 +65,48 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
-app.use('/api/aurora', auroraRoutes);
-app.get('/aurora', (req, res) => res.render('aurora', { user: null, appVersion: APP_VERSION }));
-app.get('/', (req, res) => res.redirect('/aurora'));
+// Everything below can read req.user (null if not signed in).
+app.use(attachSession);
+
+// /health and /api/aurora/version are the only two API endpoints that are
+// public — they're cheap probes that shouldn't require a session.
 app.get('/health', (req, res) => res.json({ status: 'OK', version: APP_VERSION.version, timestamp: new Date().toISOString() }));
 app.get('/api/aurora/version', (req, res) => res.json(APP_VERSION));
+
+// Auth API is mounted BEFORE the guarded router so /login and /setup can hit it
+// without a session.
+app.use('/api/aurora/auth', authRoutes);
+
+// Everything else under /api/aurora/* needs an authenticated session; individual
+// endpoints add requirePerm() for finer-grained checks.
+app.use('/api/aurora', requireAuth, auroraRoutes);
+
+app.get('/setup', async (req, res) => {
+  if (!(await auroraAuth.needsSetup())) return res.redirect('/aurora');
+  res.render('auth', { mode: 'setup', nextUrl: '/aurora' });
+});
+app.get('/login', async (req, res) => {
+  if (await auroraAuth.needsSetup()) return res.redirect('/setup');
+  if (req.user) return res.redirect('/aurora');
+  res.render('auth', { mode: 'login', nextUrl: (req.query.next && String(req.query.next).startsWith('/')) ? req.query.next : '/aurora' });
+});
+
+app.get('/aurora', async (req, res) => {
+  if (await auroraAuth.needsSetup()) return res.redirect('/setup');
+  if (!req.user) return res.redirect('/login?next=' + encodeURIComponent('/aurora'));
+  // Thumbnails are cached hard in the browser (max-age 24h) and keyed by asset id.
+  // A re-import reassigns ids to different files, so a stale browser cache would
+  // show the wrong thumbnail. Stamp every thumb URL with a cache epoch tied to the
+  // latest import — it changes on each import, so reused ids never collide with a
+  // previously-cached thumbnail.
+  let cacheEpoch = String(APP_VERSION.build || '0');
+  try {
+    const row = await auroraDb.get('SELECT MAX(started_at) AS e FROM import_sessions');
+    if (row && row.e) cacheEpoch = String(row.e);
+  } catch (_) {}
+  res.render('aurora', { user: req.user, appVersion: APP_VERSION, cacheEpoch });
+});
+app.get('/', (req, res) => res.redirect('/aurora'));
 
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
@@ -80,6 +120,10 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
     try { fs.mkdirSync(path.dirname(auroraDb.DB_PATH), { recursive: true }); } catch (_) {}
 
     await auroraDb.initSchema();
+    await auroraAuth.ensureBuiltinRoles();
+    await auroraAuth.pruneExpiredSessions();
+    // Cheap periodic sweep so the sessions table doesn't grow forever.
+    setInterval(() => auroraAuth.pruneExpiredSessions().catch(() => {}), 60 * 60 * 1000).unref();
     await auroraIndexer.recoverInterruptedSessions();
 
     // Live Photo pairing (still + short clip → one item). Idempotent, non-blocking.

@@ -20,12 +20,27 @@ function getMountPoint(shareId, host, shareName) {
 // to the EXISTING photo index (asset paths already point at this dir) instead of
 // creating a fresh, orphaned mountpoint. The leading id (timestamp) may differ;
 // we match on the stable `_<host>_<share>` suffix.
+// When multiple directories match (e.g. a duplicate was created), prefer the one
+// already in fstab (persisted), then fall back to the alphabetically first entry
+// (lowest timestamp = oldest = most likely the indexed one).
 function findReusableMountPoint(host, shareName) {
   const suffix = `_${slugify(host)}_${slugify(shareName)}`;
   try {
     if (!fs.existsSync(MOUNT_BASE)) return null;
-    const match = fs.readdirSync(MOUNT_BASE).find(e => e.endsWith(suffix));
-    if (match) return path.join(MOUNT_BASE, match);
+    const matches = fs.readdirSync(MOUNT_BASE)
+      .filter(e => e.endsWith(suffix))
+      .sort(); // alphabetical = lowest timestamp first
+    if (!matches.length) return null;
+    if (matches.length === 1) return path.join(MOUNT_BASE, matches[0]);
+    // Multiple matches — prefer the one already in fstab.
+    try {
+      const fstab = fs.readFileSync(FSTAB_PATH, 'utf8');
+      for (const m of matches) {
+        const mp = path.join(MOUNT_BASE, m);
+        if (fstab.split('\n').some(line => line.split(/\s+/)[1] === mp)) return mp;
+      }
+    } catch { /* fall through */ }
+    return path.join(MOUNT_BASE, matches[0]);
   } catch { /* fall through */ }
   return null;
 }
@@ -114,7 +129,7 @@ async function isMounted(mountPoint) {
 // List all active photo-dedup mounts
 async function listActiveMounts() {
   try {
-    const { stdout } = await execAsync(`findmnt --noheadings --output TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null | grep "${MOUNT_BASE}"`);
+    const { stdout } = await execAsync(`findmnt --noheadings --raw --output TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null | grep "${MOUNT_BASE}"`);
     return stdout.trim().split('\n').filter(Boolean).map(line => {
       const [target, source, fstype, options] = line.trim().split(/\s+/);
       return { target, source, fstype, options };
