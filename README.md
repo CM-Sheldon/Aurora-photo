@@ -5,6 +5,25 @@ were taken, albums, powerful fuzzy search, Live Photo support, and import from l
 folders or SMB/NFS network shares. Your originals are never modified — Aurora only
 builds an index and thumbnail cache.
 
+## Disclaimer
+
+**This software was written with the help of AI (Claude).** It is provided
+**as-is**, without warranty of any kind — express or implied — including but not
+limited to warranties of merchantability, fitness for a particular purpose, or
+non-infringement.
+
+The authors and contributors accept **no responsibility and no liability** for
+any loss of data, file corruption, hardware or system damage, downtime, security
+incidents, or any other direct, indirect, incidental, consequential or special
+damages arising from installing, running, updating or otherwise using this
+software. Aurora reads your photo originals to build its index and never modifies
+them, and updates take a code snapshot + database backup before applying, but
+those safeguards are best-effort — **the only backup you can rely on is the one
+you keep yourself.** Please maintain independent backups of any photos or data
+you can't afford to lose.
+
+Use of this software is entirely at your own risk.
+
 ## Install (one line)
 
 On a fresh Linux server:
