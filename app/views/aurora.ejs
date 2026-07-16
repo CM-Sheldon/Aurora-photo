@@ -108,11 +108,44 @@
       border-right: 1px solid var(--border);
       backdrop-filter: blur(20px);
       padding: 0;
+      position: relative;
+      transition: width 0.2s ease;
     }
     .sidebar-logo {
       padding: 24px 20px 18px;
       display: flex; align-items: center; gap: 10px;
       border-bottom: 1px solid var(--border);
+    }
+    /* Sidebar collapse toggle — floats on the right edge and rotates 180° when collapsed. */
+    .sidebar-collapse {
+      position: absolute; top: 22px; right: -12px; z-index: 10;
+      width: 24px; height: 24px; border-radius: 50%;
+      background: rgba(14,14,24,0.98); border: 1px solid var(--border-strong);
+      color: var(--text-muted); cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-family: inherit; font-size: 12px; line-height: 1;
+      transition: color 0.15s, transform 0.2s ease;
+      padding: 0;
+    }
+    .sidebar-collapse:hover { color: var(--text); }
+    body.sidebar-collapsed {
+      --sidebar-w: 68px;
+    }
+    body.sidebar-collapsed .sidebar-collapse { transform: rotate(180deg); }
+    body.sidebar-collapsed .sidebar-logo { padding: 22px 0 18px; justify-content: center; }
+    body.sidebar-collapsed .sidebar-logo > div:not(.logo-icon) { display: none; }
+    body.sidebar-collapsed .sidebar-nav { padding: 12px 8px; }
+    body.sidebar-collapsed .nav-item { justify-content: center; padding: 10px 6px; gap: 0; }
+    body.sidebar-collapsed .nav-item > *:not(.nav-icon) { display: none; }
+    body.sidebar-collapsed .nav-section { display: none; }
+    body.sidebar-collapsed .sidebar-stats { display: none; }
+    body.sidebar-collapsed .nav-item[data-tip]:hover::after {
+      content: attr(data-tip);
+      position: absolute; left: calc(100% + 8px); top: 50%; transform: translateY(-50%);
+      background: rgba(14,14,24,0.98); border: 1px solid var(--border-strong);
+      color: var(--text); padding: 5px 10px; border-radius: 6px;
+      font-size: 12px; font-family: inherit; white-space: nowrap; pointer-events: none;
+      z-index: 200;
     }
     .logo-icon {
       width: 32px; height: 32px; border-radius: 8px;
@@ -482,10 +515,22 @@
     .place-detail-name { font-size: 15px; font-weight: 600; }
     .place-detail-meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-top: 4px; }
     .place-detail-preview-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-faint); padding: 12px 12px 0; }
-    .place-mini-grid { padding: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; flex: 1; overflow-y: auto; align-content: start; }
-    .place-mini-tile { position: relative; }
-    .place-mini-tile { aspect-ratio: 1; border-radius: 4px; overflow: hidden; background: rgba(255,255,255,0.04); cursor: pointer; }
-    .place-mini-tile img { width: 100%; height: 100%; object-fit: cover; }
+    .place-mini-grid { padding: 12px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; flex: 1; overflow-y: auto; align-content: start; min-width: 0; }
+    .place-mini-tile {
+      position: relative;
+      /* Square tile keyed off the row's inline size. aspect-ratio alone was
+         inconsistent on iOS Safari inside grid tracks — the tile would
+         sometimes render at natural image height and overlap its neighbour.
+         padding-top: 100% is universally supported and forces a square. */
+      width: 100%;
+      padding-top: 100%;
+      border-radius: 4px; overflow: hidden;
+      background: rgba(255,255,255,0.04); cursor: pointer;
+    }
+    .place-mini-tile img {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%; object-fit: cover;
+    }
 
     /* ── SEARCH SCREEN ── */
     .search-layout { flex: 1; display: flex; overflow: hidden; }
@@ -638,6 +683,33 @@
     .update-status.ok { color: #4ade80; border-color: rgba(74,222,128,0.3); }
     .update-status.err { color: #f87171; border-color: rgba(248,113,113,0.3); }
     .update-status.info { color: var(--accent); border-color: rgba(167,139,250,0.3); }
+    .update-summary {
+      display: flex; flex-direction: column; gap: 6px; margin-top: 8px;
+      padding: 12px 14px; border-radius: 8px;
+      background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+    }
+    .update-summary.uptodate { border-color: rgba(74,222,128,0.35); background: rgba(74,222,128,0.06); }
+    .update-summary.available { border-color: rgba(167,139,250,0.35); background: rgba(167,139,250,0.06); }
+    .update-summary.err { border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.05); }
+    .update-status-line { font-size: 13px; color: var(--text); font-weight: 500; }
+    .update-status-line .badge { display:inline-block; padding: 2px 8px; border-radius: 8px; font-family: var(--font-mono); font-size: 11px; margin-left: 8px; }
+    .update-status-line .badge.new { background: rgba(167,139,250,0.15); color: var(--accent); }
+    .update-status-line .badge.ok  { background: rgba(74,222,128,0.15); color: #4ade80; }
+    .update-detail { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+    .update-changelog { margin-top: 12px; }
+    .update-changelog summary { cursor: pointer; font-size: 12px; color: var(--text-muted); padding: 4px 0; }
+    .update-changelog summary:hover { color: var(--text); }
+    .changelog-body {
+      max-height: 320px; overflow-y: auto;
+      margin-top: 8px; padding: 12px 14px;
+      font-size: 12.5px; line-height: 1.55;
+      background: rgba(0,0,0,0.28); border: 1px solid var(--border);
+      border-radius: 6px;
+      white-space: pre-wrap; word-break: break-word;
+      color: var(--text);
+    }
+    .changelog-body code { font-family: var(--font-mono); background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 3px; font-size: 11.5px; }
+    .changelog-body a { color: var(--accent); }
     .import-card {
       background: var(--panel); border: 1px solid var(--border);
       border-radius: var(--radius); padding: 24px; margin-bottom: 20px;
@@ -1042,6 +1114,7 @@
     .rbac-dialog .actions { display:flex; gap:8px; justify-content:flex-end; margin-top:18px; }
     .rbac-dialog .err { display:none; margin-top:10px; padding:8px 10px; background:rgba(248,113,113,0.1); border:1px solid rgba(248,113,113,0.3); border-radius:8px; color:#f87171; font-size:12px; }
     .rbac-dialog .err.show { display:block; }
+    .rbac-dialog .rbac-hint { margin-top:10px; font-size:12px; color:var(--text-muted); line-height:1.45; }
 
     /* ── Topbar user chip ── */
     .user-chip { display:flex; align-items:center; gap:6px; padding:6px 10px; border-radius:20px; background:var(--panel); border:1px solid var(--border); font-size:12px; color:var(--text); cursor:pointer; font-family:inherit; }
@@ -1290,6 +1363,7 @@
   <div class="app">
     <!-- Sidebar -->
     <aside class="sidebar">
+      <button type="button" class="sidebar-collapse" id="sidebarCollapseBtn" onclick="toggleSidebar()" title="Collapse sidebar" aria-label="Collapse sidebar">‹</button>
       <div class="sidebar-logo">
         <div class="logo-icon">✦</div>
         <div>
@@ -1299,22 +1373,22 @@
       </div>
 
       <nav class="sidebar-nav">
-        <div class="nav-item active" data-screen="library">
+        <div class="nav-item active" data-screen="library" data-tip="Library">
           <span class="nav-icon">▦</span> Library
           <span class="nav-badge" id="navBadgeLibrary">—</span>
         </div>
-        <div class="nav-item" data-screen="places">
+        <div class="nav-item" data-screen="places" data-tip="Places">
           <span class="nav-icon">◎</span> Places
           <span class="nav-badge" id="navBadgePlaces">—</span>
         </div>
-        <div class="nav-item" data-screen="search">
+        <div class="nav-item" data-screen="search" data-tip="Search">
           <span class="nav-icon">⌕</span> Search
         </div>
-        <div class="nav-item" data-screen="albums">
+        <div class="nav-item" data-screen="albums" data-tip="Albums">
           <span class="nav-icon">⊞</span> Albums
         </div>
         <div class="nav-section" data-perm-any="settings.view users.manage audit.view photos.hidden">System</div>
-        <div class="nav-item" data-screen="settings" data-perm-any="settings.view users.manage audit.view photos.hidden">
+        <div class="nav-item" data-screen="settings" data-perm-any="settings.view users.manage audit.view photos.hidden" data-tip="Settings &amp; Import">
           <span class="nav-icon">⚙</span> Settings &amp; Import
         </div>
       </nav>
@@ -1342,7 +1416,7 @@
             <button class="tab-btn" data-filter="video">Videos</button>
             <button class="tab-btn" data-filter="fav">Favorites</button>
           </div>
-          <button class="btn btn-ghost" id="libSelectBtn" style="font-size:12px;margin-left:8px;" onclick="toggleSelectMode()">Select</button>
+          <button class="btn btn-ghost" id="libSelectBtn" data-perm-any="photos.tag photos.download photos.hidden" style="font-size:12px;margin-left:8px;" onclick="toggleSelectMode()">Select</button>
         </div>
         <div class="library-controls">
           <div class="slider-row">
@@ -1417,7 +1491,7 @@
           <span class="topbar-title">Search</span>
           <span class="topbar-count" id="searchCount"></span>
           <div class="topbar-spacer"></div>
-          <button class="btn btn-ghost" id="searchSelectBtn" style="font-size:12px;" onclick="toggleSelectMode()">Select</button>
+          <button class="btn btn-ghost" id="searchSelectBtn" data-perm-any="photos.tag photos.download photos.hidden" style="font-size:12px;" onclick="toggleSelectMode()">Select</button>
         </div>
         <div class="search-wrap-inner">
           <div class="search-input-wrap" style="padding-top:14px;">
@@ -1841,16 +1915,39 @@
           </div>
 
           <div class="stab-panel" id="stab-system">
+            <!-- ── Software update (GitHub) ── -->
             <div class="import-card">
-              <div class="import-card-title">Apply an update</div>
+              <div class="import-card-title">Software update</div>
               <div id="updateVersionLine" style="font-size:13px;color:var(--text-muted);margin-bottom:6px;">Loading version…</div>
-              <div class="card-help">Place an Aurora update zip on this server, then enter its full path below and click Apply. Your photo library, thumbnails, and favourites are never touched by an update.</div>
-              <div class="update-row">
-                <input type="text" id="updateZipPath" placeholder="/opt/aurora-updates/aurora-photos-update.zip" autocomplete="off" spellcheck="false">
-                <button class="btn" id="updateApplyBtn" onclick="applyUpdate()">Apply Update</button>
+              <div class="card-help">Aurora checks GitHub for a new release. Your photo library, thumbnails, tags, favourites and captions live in <code>/var/lib/aurora-photos/</code> and are never touched by an update — plus a rollback snapshot and DB backup are taken before every install, so a failed update automatically reverts to the previous version.</div>
+
+              <div class="update-summary" id="updateSummary">
+                <div class="update-status-line" id="updateCheckStatus">Checking for updates…</div>
               </div>
+
+              <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="btn btn-ghost" id="updateCheckBtn" onclick="checkForUpdates()">↻ Check again</button>
+                <button class="btn" id="updateApplyBtn" style="display:none;" onclick="applyGitHubUpdate()">Update now</button>
+                <a class="btn btn-ghost" id="updateReleaseLink" href="#" target="_blank" rel="noopener" style="display:none;">Release notes ↗</a>
+              </div>
+
+              <details class="update-changelog" id="updateChangelogWrap" style="display:none;">
+                <summary>What's new</summary>
+                <div class="changelog-body" id="updateChangelog"></div>
+              </details>
+
               <div class="update-status" id="updateStatus"></div>
             </div>
+
+            <!-- ── Advanced: local zip fallback ── -->
+            <details class="import-card" id="advancedUpdateCard">
+              <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text-muted);">Advanced — install from a local zip</summary>
+              <div class="card-help" style="margin-top:10px;">If the server can't reach GitHub, copy an Aurora update zip onto this box and enter its full path. Same safety net (rollback + DB backup) applies.</div>
+              <div class="update-row">
+                <input type="text" id="updateZipPath" placeholder="/opt/aurora-updates/aurora-photos-update.zip" autocomplete="off" spellcheck="false">
+                <button class="btn" id="updateApplyLocalBtn" onclick="applyUpdate()">Apply Update</button>
+              </div>
+            </details>
           </div>
 
         </div>
@@ -1868,8 +1965,10 @@
     <div class="bnav-item" data-screen="settings" data-perm-any="settings.view users.manage audit.view photos.hidden"><span class="bnav-icon">⚙</span><span>Settings</span></div>
   </nav>
 
-  <!-- RBAC dialog (users / roles). Reuses passcode-overlay backdrop. -->
-  <div class="passcode-overlay" id="rbacOverlay" style="display:none;" onclick="if(event.target===this) closeRbacDialog()">
+  <!-- RBAC dialog (users / roles). Reuses passcode-overlay backdrop.
+       When dataset.forced is '1' (change-PIN required), backdrop clicks are
+       ignored so the user can't dismiss the mandatory dialog. -->
+  <div class="passcode-overlay" id="rbacOverlay" style="display:none;" onclick="if(event.target===this && !this.dataset.forced) closeRbacDialog()">
     <div class="rbac-dialog" id="rbacDialog"></div>
   </div>
 
@@ -3966,6 +4065,10 @@
             tile.style.left = (c * (cellW + gap)) + 'px';
             tile.style.top = (r * rowH) + 'px';
             tile.style.width = cellW + 'px';
+            // Explicit height — iOS Safari doesn't reliably honour aspect-ratio
+            // on position:absolute children, so tiles were collapsing / overlapping
+            // in the search results grid on iPhone. Library uses the same fix.
+            tile.style.height = cellW + 'px';
             grid.appendChild(tile);
             svgrid.rendered.set(idx, tile);
           }
@@ -4429,7 +4532,7 @@
         p.classList.toggle('active', p.id === 'stab-' + tab);
       });
       if (tab === 'privacy') loadPrivacyStats();
-      if (tab === 'system') loadUpdateVersion();
+      if (tab === 'system') { loadUpdateVersion(); checkForUpdates(); }
       if (tab === 'manage') loadCaptions(); else stopCaptionPolling();
       if (tab === 'users') { loadUsers(); loadRoles(); }
       if (tab === 'audit') loadAudit();
@@ -4870,7 +4973,14 @@
     }
 
     // ── Software update ──────────────────────────────────────────────────────
+    //
+    // The System tab shows the current build, the latest GitHub release, and
+    // the changelog. One click ("Update now") downloads the update-zip
+    // asset from the release and hands it to the same server-side applier
+    // used by the local-zip fallback (which rolls back on failure and never
+    // touches DATA_DIR).
     let updatePoller = null;
+    let updateLatest = null;
 
     async function loadUpdateVersion() {
       try {
@@ -4889,11 +4999,124 @@
       el.className = 'update-status visible ' + (kind || 'info');
     }
 
+    // Very small Markdown renderer for GitHub release bodies — headings,
+    // bullets, bold/italic, inline code, links. Enough for a readable
+    // changelog without pulling a full markdown library into the SPA.
+    function mdEscape(s) {
+      return String(s).replace(/[&<>]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;' }[c]));
+    }
+    function renderChangelog(md) {
+      if (!md) return '<em style="color:var(--text-muted)">No release notes provided.</em>';
+      const lines = String(md).replace(/\r\n/g, '\n').split('\n');
+      const out = [];
+      let inList = false;
+      const inline = (t) => mdEscape(t)
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|\s)\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+      for (const raw of lines) {
+        const line = raw.trimEnd();
+        const h = line.match(/^(#{1,3})\s+(.+)$/);
+        const li = line.match(/^\s*[-*]\s+(.+)$/);
+        if (h) {
+          if (inList) { out.push('</ul>'); inList = false; }
+          const level = Math.min(4, h[1].length + 2);
+          out.push(`<h${level} style="margin:10px 0 4px;font-size:${16 - h[1].length}px;">${inline(h[2])}</h${level}>`);
+        } else if (li) {
+          if (!inList) { out.push('<ul style="margin:6px 0 6px 20px;padding:0;">'); inList = true; }
+          out.push(`<li style="margin-bottom:3px;">${inline(li[1])}</li>`);
+        } else if (!line) {
+          if (inList) { out.push('</ul>'); inList = false; }
+          out.push('<div style="height:6px;"></div>');
+        } else {
+          if (inList) { out.push('</ul>'); inList = false; }
+          out.push(`<div>${inline(line)}</div>`);
+        }
+      }
+      if (inList) out.push('</ul>');
+      return out.join('');
+    }
+
+    async function checkForUpdates() {
+      const btn = document.getElementById('updateCheckBtn');
+      const summary = document.getElementById('updateSummary');
+      const statusLine = document.getElementById('updateCheckStatus');
+      const applyBtn = document.getElementById('updateApplyBtn');
+      const linkBtn = document.getElementById('updateReleaseLink');
+      const clWrap = document.getElementById('updateChangelogWrap');
+      if (btn) btn.disabled = true;
+      summary.className = 'update-summary';
+      statusLine.textContent = 'Checking GitHub for the latest release…';
+      applyBtn.style.display = 'none';
+      linkBtn.style.display = 'none';
+      clWrap.style.display = 'none';
+      try {
+        const r = await fetch('/api/aurora/settings/update/check');
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Check failed');
+        updateLatest = data.latest;
+        const curV = (data.current && data.current.version) || '?';
+        const latV = (data.latest && data.latest.version) || '?';
+        if (data.updateAvailable && data.assetAvailable) {
+          summary.className = 'update-summary available';
+          statusLine.innerHTML = `Update available: <strong>v${escapeHtml(latV)}</strong> <span class="badge new">NEW</span>` +
+            `<div class="update-detail">Installed: v${escapeHtml(curV)} · ${data.latest.assetName || ''}` +
+            (data.latest.assetSize ? ` · ${(data.latest.assetSize/1024/1024).toFixed(1)} MB` : '') +
+            (data.latest.publishedAt ? ` · published ${new Date(data.latest.publishedAt).toLocaleDateString()}` : '') +
+            `</div>`;
+          applyBtn.style.display = '';
+          applyBtn.disabled = false;
+        } else if (data.updateAvailable && !data.assetAvailable) {
+          summary.className = 'update-summary err';
+          statusLine.innerHTML = `Latest release <strong>v${escapeHtml(latV)}</strong> has no update-zip asset yet. Try again in a few minutes, or install from a local zip below.`;
+        } else {
+          summary.className = 'update-summary uptodate';
+          statusLine.innerHTML = `You're up to date <span class="badge ok">v${escapeHtml(curV)}</span>` +
+            `<div class="update-detail">Latest release: v${escapeHtml(latV)}</div>`;
+        }
+        if (data.latest && data.latest.htmlUrl) {
+          linkBtn.href = data.latest.htmlUrl;
+          linkBtn.style.display = '';
+        }
+        if (data.latest && data.latest.changelog) {
+          document.getElementById('updateChangelog').innerHTML = renderChangelog(data.latest.changelog);
+          clWrap.style.display = '';
+          if (data.updateAvailable) clWrap.open = true;
+        }
+      } catch (e) {
+        summary.className = 'update-summary err';
+        statusLine.textContent = 'Could not check for updates: ' + e.message;
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function applyGitHubUpdate() {
+      if (!updateLatest) return;
+      if (!confirm(`Install Aurora Photos v${updateLatest.version}?\n\nThe service will restart. Your library and settings are preserved, and a rollback snapshot is taken automatically so a failed update reverts to the current version.`)) return;
+      const btn = document.getElementById('updateApplyBtn');
+      btn.disabled = true;
+      setUpdateStatus('Downloading update from GitHub…', 'info');
+      try {
+        const r = await fetch('/api/aurora/settings/update/apply-github', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+        });
+        const data = await r.json();
+        if (!r.ok) { setUpdateStatus('Error: ' + (data.error || 'Update failed'), 'err'); btn.disabled = false; return; }
+        setUpdateStatus(data.message || 'Update triggered…', 'info');
+        startUpdatePoller();
+      } catch (e) {
+        setUpdateStatus('Request failed: ' + e.message, 'err');
+        btn.disabled = false;
+      }
+    }
+
     async function applyUpdate() {
       const zipPath = (document.getElementById('updateZipPath').value || '').trim();
       if (!zipPath) { setUpdateStatus('Please enter the full path to the update zip file.', 'err'); return; }
 
-      const btn = document.getElementById('updateApplyBtn');
+      const btn = document.getElementById('updateApplyLocalBtn');
       btn.disabled = true;
       setUpdateStatus('Sending update request…', 'info');
 
@@ -4923,13 +5146,20 @@
           if (s.status === 'complete') {
             clearInterval(updatePoller); updatePoller = null;
             setUpdateStatus('✓ ' + msg, 'ok');
-            document.getElementById('updateApplyBtn').disabled = false;
+            const gb = document.getElementById('updateApplyBtn'); if (gb) gb.disabled = false;
+            const lb = document.getElementById('updateApplyLocalBtn'); if (lb) lb.disabled = false;
             // Reload the page after a moment so the new version is reflected
             setTimeout(() => location.reload(), 2000);
           } else if (s.status === 'error') {
             clearInterval(updatePoller); updatePoller = null;
             setUpdateStatus('✗ ' + msg, 'err');
-            document.getElementById('updateApplyBtn').disabled = false;
+            const gb = document.getElementById('updateApplyBtn'); if (gb) gb.disabled = false;
+            const lb = document.getElementById('updateApplyLocalBtn'); if (lb) lb.disabled = false;
+          } else if (s.status === 'rolled_back') {
+            clearInterval(updatePoller); updatePoller = null;
+            setUpdateStatus('⤺ ' + msg, 'err');
+            const gb = document.getElementById('updateApplyBtn'); if (gb) gb.disabled = false;
+            const lb = document.getElementById('updateApplyLocalBtn'); if (lb) lb.disabled = false;
           } else if (s.status !== 'idle') {
             setUpdateStatus(msg || 'Updating…', 'info');
           }
@@ -5342,11 +5572,72 @@
         window.AURORA_ME = await r.json();
         applyPermissionsToUI();
         renderUserChip();
+        // If the account is flagged (admin reset, or admin created a fresh
+        // user), the app is unusable until the user picks their own PIN.
+        if (window.AURORA_ME.mustChangePin) openChangePinDialog({ forced: true });
       } catch (_) {}
       finally {
         // Always drop the pre-load cloak, even if /me failed — otherwise nothing
         // with data-perm* would ever become visible.
         document.body.classList.add('perms-ready');
+      }
+    }
+    // ── Change PIN dialog ──
+    // Reuses the RBAC dialog surface so styling matches the admin flows. When
+    // opened via {forced: true} the cancel button is hidden and clicks outside
+    // don't dismiss — the user must complete the change to continue.
+    function openChangePinDialog(opts) {
+      const forced = !!(opts && opts.forced);
+      const menu = document.getElementById('userMenu');
+      if (menu) menu.classList.remove('show');
+      const overlay = document.getElementById('rbacOverlay');
+      overlay.style.display = 'flex';
+      overlay.dataset.forced = forced ? '1' : '';
+      const dlg = document.getElementById('rbacDialog');
+      dlg.innerHTML = `
+        <h3>${forced ? 'Choose a new PIN' : 'Change PIN'}</h3>
+        ${forced ? '<div class="rbac-hint" style="margin-top:0;margin-bottom:8px;">An administrator reset your PIN. Pick a new 4-digit PIN before you continue.</div>' : ''}
+        <label class="field">${forced ? 'Temporary PIN (from your admin)' : 'Current PIN'}</label>
+        <input type="password" id="cp_old" maxlength="4" inputmode="numeric" pattern="\\d{4}" autocomplete="current-password" style="letter-spacing:12px;text-align:center;font-family:var(--font-mono);">
+        <label class="field">New 4-digit PIN</label>
+        <input type="password" id="cp_new" maxlength="4" inputmode="numeric" pattern="\\d{4}" autocomplete="new-password" style="letter-spacing:12px;text-align:center;font-family:var(--font-mono);">
+        <label class="field">Confirm new PIN</label>
+        <input type="password" id="cp_new2" maxlength="4" inputmode="numeric" pattern="\\d{4}" autocomplete="new-password" style="letter-spacing:12px;text-align:center;font-family:var(--font-mono);">
+        <div class="err" id="rd_err"></div>
+        <div class="actions">
+          ${forced ? '' : '<button class="btn btn-ghost" onclick="closeRbacDialog()">Cancel</button>'}
+          <button class="btn" id="cp_submit" onclick="submitChangePin()">${forced ? 'Set new PIN' : 'Update PIN'}</button>
+        </div>
+      `;
+      ['cp_old','cp_new','cp_new2'].forEach(id => {
+        const el = document.getElementById(id);
+        el.addEventListener('input', () => { el.value = el.value.replace(/\D/g, '').slice(0, 4); });
+      });
+      setTimeout(() => document.getElementById('cp_old').focus(), 30);
+    }
+    async function submitChangePin() {
+      const oldPin = document.getElementById('cp_old').value;
+      const newPin = document.getElementById('cp_new').value;
+      const newPin2 = document.getElementById('cp_new2').value;
+      if (!/^\d{4}$/.test(newPin)) return showRbacErr('New PIN must be 4 digits');
+      if (newPin !== newPin2) return showRbacErr('New PINs do not match');
+      if (newPin === oldPin) return showRbacErr('New PIN must be different from the current PIN');
+      const btn = document.getElementById('cp_submit');
+      btn.disabled = true;
+      try {
+        const r = await fetch('/api/aurora/auth/change-pin', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ currentPin: oldPin, newPin }),
+        });
+        const b = await r.json().catch(() => ({}));
+        if (!r.ok) { showRbacErr(b.error || 'Failed'); btn.disabled = false; return; }
+        if (window.AURORA_ME) window.AURORA_ME.mustChangePin = false;
+        document.getElementById('rbacOverlay').dataset.forced = '';
+        closeRbacDialog();
+        toast('PIN updated — other devices signed out');
+      } catch (e) {
+        showRbacErr(e.message || 'Failed');
+        btn.disabled = false;
       }
     }
     function applyPermissionsToUI() {
@@ -5394,6 +5685,7 @@
       const menu = document.getElementById('userMenu');
       menu.innerHTML =
         '<div class="row head">' + escapeHtml(me.username) + ' · ' + escapeHtml(me.role) + '</div>' +
+        '<div class="row" onclick="openChangePinDialog()">Change PIN</div>' +
         '<div class="row" onclick="doLogout()">Sign out</div>';
     }
     function toggleUserMenu(e) {
@@ -5464,7 +5756,8 @@
       openRbacDialog(`
         <h3>Reset PIN for ${escapeHtml(name)}</h3>
         <label class="field">New 4-digit PIN</label>
-        <input type="text" id="rd_pin" maxlength="4" inputmode="numeric" pattern="\\d{4}" style="letter-spacing:12px;text-align:center;font-family:var(--font-mono);">
+        <input type="password" id="rd_pin" maxlength="4" inputmode="numeric" pattern="\\d{4}" autocomplete="new-password" style="letter-spacing:12px;text-align:center;font-family:var(--font-mono);">
+        <div class="rbac-hint">User will be prompted to choose their own PIN on next sign in.</div>
         <div class="err" id="rd_err"></div>
         <div class="actions">
           <button class="btn btn-ghost" onclick="closeRbacDialog()">Cancel</button>
@@ -5494,9 +5787,10 @@
           <label class="field">Username</label>
           <input type="text" id="rd_user" autocomplete="off" spellcheck="false">
           <label class="field">4-digit PIN</label>
-          <input type="text" id="rd_pin" maxlength="4" inputmode="numeric" pattern="\\d{4}" style="letter-spacing:12px;text-align:center;font-family:var(--font-mono);">
+          <input type="password" id="rd_pin" maxlength="4" inputmode="numeric" pattern="\\d{4}" autocomplete="new-password" style="letter-spacing:12px;text-align:center;font-family:var(--font-mono);">
           <label class="field">Role</label>
           <select id="rd_role">${roleOpts}</select>
+          <div class="rbac-hint">User will be prompted to choose their own PIN on first sign in.</div>
           <div class="err" id="rd_err"></div>
           <div class="actions">
             <button class="btn btn-ghost" onclick="closeRbacDialog()">Cancel</button>
@@ -5615,17 +5909,43 @@
 
     // ── RBAC dialog helpers ────────────────────────────────────────────
     function openRbacDialog(html) {
+      const ov = document.getElementById('rbacOverlay');
+      ov.dataset.forced = '';   // regular dialog — allow dismissal
       document.getElementById('rbacDialog').innerHTML = html;
-      document.getElementById('rbacOverlay').style.display = 'flex';
+      ov.style.display = 'flex';
     }
     function closeRbacDialog() {
-      document.getElementById('rbacOverlay').style.display = 'none';
+      const ov = document.getElementById('rbacOverlay');
+      if (ov.dataset.forced) return;   // change-PIN can't be dismissed
+      ov.style.display = 'none';
       document.getElementById('rbacDialog').innerHTML = '';
     }
     function showRbacErr(msg) {
       const el = document.getElementById('rd_err');
       if (el) { el.textContent = msg; el.classList.add('show'); }
     }
+
+    // ── Sidebar collapse (desktop only) ──
+    // Persisted so it survives reloads. Mobile ignores this — bottom-nav owns
+    // navigation there and the sidebar itself is display:none.
+    function applySidebarState() {
+      try {
+        const v = localStorage.getItem('aurora.sidebarCollapsed');
+        document.body.classList.toggle('sidebar-collapsed', v === '1');
+      } catch (_) {}
+    }
+    function toggleSidebar() {
+      const now = !document.body.classList.contains('sidebar-collapsed');
+      document.body.classList.toggle('sidebar-collapsed', now);
+      try { localStorage.setItem('aurora.sidebarCollapsed', now ? '1' : '0'); } catch (_) {}
+      // The library grid is virtualized on width — re-layout after the CSS
+      // transition finishes so tiles snap to the new column count.
+      setTimeout(() => {
+        try { if (typeof computeGridLayout === 'function') { computeGridLayout(); paintWindow(true); } } catch (_) {}
+        try { if (svgrid && svgrid.items.length) { searchComputeLayout(); searchPaintWindow(); } } catch (_) {}
+      }, 220);
+    }
+    applySidebarState();
 
     // ── Boot ──
     (async () => {

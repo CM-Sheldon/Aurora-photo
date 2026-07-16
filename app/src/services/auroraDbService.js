@@ -201,6 +201,11 @@ function initSchema() {
       )`);
       d.run(`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`);
       d.run(`CREATE INDEX IF NOT EXISTS idx_sessions_exp ON sessions(expires_at)`);
+      // must_change_pin flags a user whose PIN was reset by an admin (or set
+      // during "add user"). Cleared the moment they choose their own PIN from
+      // the forced change-PIN screen. Additive migration — no default users
+      // are affected retroactively.
+      addColumn(`ALTER TABLE users ADD COLUMN must_change_pin INTEGER DEFAULT 0`);
       d.run(`CREATE TABLE IF NOT EXISTS audit_log (
         id INTEGER PRIMARY KEY,
         ts INTEGER NOT NULL,

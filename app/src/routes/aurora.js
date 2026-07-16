@@ -1451,6 +1451,7 @@ router.post('/settings/update/apply', requirePerm('settings.manage'), async (req
       '--description=Aurora Photos software update',
       `--setenv=INSTALL_DIR=${INSTALL_DIR}`,
       `--setenv=DATA_DIR=${DATA_ROOT}`,
+      `--setenv=AURORA_HEALTH_PORT=${process.env.PORT || '8080'}`,
       'bash', UPDATER_SCRIPT, effectiveRoot
     ], { detached: true, stdio: 'ignore' });
     child.unref();
@@ -1459,6 +1460,191 @@ router.post('/settings/update/apply', requirePerm('settings.manage'), async (req
   } catch (err) {
     try { fs.rmSync(stagingDir, { recursive: true, force: true }); } catch (_) {}
     return res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GitHub update check + apply ─────────────────────────────────────────────
+//
+// The System tab shows "You're up to date" or the latest release with its
+// changelog. One click downloads the update-zip asset from GitHub Releases
+// and hands it to the existing apply flow. The check is cached for 5 min so
+// polling the panel doesn't hammer api.github.com and get rate-limited.
+
+const GITHUB_REPO = process.env.AURORA_GITHUB_REPO || 'CM-Sheldon/Aurora-photo';
+let githubReleaseCache = { at: 0, data: null, err: null };
+const GITHUB_CACHE_MS = 5 * 60 * 1000;
+
+// semver compare — returns -1 / 0 / 1. Ignores pre-release / metadata.
+function compareVersions(a, b) {
+  const norm = (v) => String(v || '').replace(/^v/i, '').split(/[.\-+]/).slice(0, 3).map(x => parseInt(x, 10) || 0);
+  const pa = norm(a), pb = norm(b);
+  for (let i = 0; i < 3; i++) {
+    const da = pa[i] || 0, db = pb[i] || 0;
+    if (da > db) return 1;
+    if (da < db) return -1;
+  }
+  return 0;
+}
+
+async function fetchLatestRelease() {
+  const now = Date.now();
+  if (githubReleaseCache.data && (now - githubReleaseCache.at) < GITHUB_CACHE_MS) {
+    return githubReleaseCache.data;
+  }
+  const url = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const r = await fetch(url, {
+      headers: { 'Accept': 'application/vnd.github+json', 'User-Agent': 'aurora-photos-updater' },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!r.ok) throw new Error(`GitHub API returned ${r.status}`);
+    const data = await r.json();
+    githubReleaseCache = { at: now, data, err: null };
+    return data;
+  } catch (e) {
+    clearTimeout(timer);
+    githubReleaseCache = { at: now, data: null, err: e.message };
+    throw e;
+  }
+}
+
+// GET /api/aurora/settings/update/check
+// Reports current version + latest GitHub release (with an update-asset URL
+// and changelog) and whether an update is available.
+router.get('/settings/update/check', requirePerm('settings.view'), async (req, res) => {
+  const current = (() => {
+    try { return JSON.parse(fs.readFileSync(path.join(INSTALL_DIR, 'version.json'), 'utf8')); }
+    catch { return { version: 'unknown' }; }
+  })();
+  try {
+    const rel = await fetchLatestRelease();
+    const tag = rel.tag_name || rel.name || '';
+    const latest = String(tag).replace(/^v/i, '');
+    const updateAsset = (rel.assets || []).find(a => /aurora-photos-update.*\.zip$/i.test(a.name));
+    const cmp = compareVersions(latest, current.version || '0.0.0');
+    res.json({
+      current,
+      latest: {
+        version: latest,
+        tag,
+        name: rel.name || tag,
+        publishedAt: rel.published_at,
+        changelog: rel.body || '',
+        htmlUrl: rel.html_url,
+        assetUrl: updateAsset ? updateAsset.browser_download_url : null,
+        assetName: updateAsset ? updateAsset.name : null,
+        assetSize: updateAsset ? updateAsset.size : null,
+      },
+      updateAvailable: cmp > 0,
+      assetAvailable: !!updateAsset,
+      checkedAt: Date.now(),
+    });
+  } catch (e) {
+    res.status(502).json({ error: 'Could not reach GitHub: ' + e.message, current });
+  }
+});
+
+// POST /api/aurora/settings/update/apply-github
+// Downloads the update zip for the currently-cached (or newly-fetched) latest
+// release to a scratch dir, then hands off to the same apply-update.sh flow
+// used by /update/apply. The zip is validated (server.js inside) before we
+// stop the service so a bad download never takes Aurora offline.
+router.post('/settings/update/apply-github', requirePerm('settings.manage'), async (req, res) => {
+  const current = readUpdateStatus();
+  if (['stopping', 'applying', 'deps', 'starting'].includes(current.status)) {
+    return res.status(409).json({ error: 'An update is already in progress', status: current.status });
+  }
+
+  let rel;
+  try { rel = await fetchLatestRelease(); }
+  catch (e) { return res.status(502).json({ error: 'GitHub unreachable: ' + e.message }); }
+
+  const updateAsset = (rel.assets || []).find(a => /aurora-photos-update.*\.zip$/i.test(a.name));
+  if (!updateAsset) return res.status(400).json({ error: 'No update-zip asset in the latest release' });
+
+  const currentVer = (() => {
+    try { return JSON.parse(fs.readFileSync(path.join(INSTALL_DIR, 'version.json'), 'utf8')).version; }
+    catch { return '0.0.0'; }
+  })();
+  const latest = String(rel.tag_name || '').replace(/^v/i, '');
+  if (compareVersions(latest, currentVer) <= 0 && !(req.body && req.body.force)) {
+    return res.status(400).json({ error: `Latest release (${latest}) is not newer than the installed version (${currentVer}). Pass {force:true} to reinstall.` });
+  }
+
+  // Download to a scratch dir. Node 20 has global fetch which supports a
+  // ReadableStream body — pipe it to disk without loading the whole zip in
+  // memory (updates can be a few MB).
+  const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-dl-'));
+  const zipPath = path.join(scratchDir, updateAsset.name);
+  const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-update-'));
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 min max
+    const r = await fetch(updateAsset.browser_download_url, {
+      headers: { 'User-Agent': 'aurora-photos-updater' },
+      signal: controller.signal,
+      redirect: 'follow',
+    });
+    clearTimeout(timer);
+    if (!r.ok) throw new Error(`Download failed: HTTP ${r.status}`);
+    const buf = Buffer.from(await r.arrayBuffer());
+    fs.writeFileSync(zipPath, buf);
+
+    // Extract + validate before we launch the applier
+    await new Promise((resolve, reject) => {
+      execFile('unzip', ['-q', zipPath, '-d', stagingDir], { timeout: 60000 }, (err) => {
+        if (err) reject(new Error('Failed to unzip: ' + err.message));
+        else resolve();
+      });
+    });
+
+    let effectiveRoot = stagingDir;
+    const topEntries = fs.readdirSync(stagingDir);
+    if (topEntries.length === 1) {
+      const single = path.join(stagingDir, topEntries[0]);
+      if (fs.statSync(single).isDirectory()) effectiveRoot = single;
+    }
+    if (!fs.existsSync(path.join(effectiveRoot, 'server.js'))) {
+      throw new Error('Downloaded update is invalid: server.js missing');
+    }
+
+    let newVersion = latest;
+    try {
+      const vj = path.join(effectiveRoot, 'version.json');
+      if (fs.existsSync(vj)) newVersion = JSON.parse(fs.readFileSync(vj, 'utf8')).version || latest;
+    } catch (_) {}
+
+    fs.writeFileSync(UPDATE_STATUS_FILE, JSON.stringify({
+      status: 'stopping', message: 'Downloaded v' + newVersion + ' — starting install', ts: Date.now(),
+    }));
+
+    const child = spawn('systemd-run', [
+      '--no-ask-password',
+      '--unit=aurora-update',
+      '--description=Aurora Photos software update',
+      `--setenv=INSTALL_DIR=${INSTALL_DIR}`,
+      `--setenv=DATA_DIR=${DATA_ROOT}`,
+      `--setenv=AURORA_HEALTH_PORT=${process.env.PORT || '8080'}`,
+      'bash', UPDATER_SCRIPT, effectiveRoot,
+    ], { detached: true, stdio: 'ignore' });
+    child.unref();
+
+    // Scratch download dir can go — the applier reads from stagingDir.
+    try { fs.rmSync(scratchDir, { recursive: true, force: true }); } catch (_) {}
+
+    res.json({
+      ok: true,
+      message: `Downloading ${updateAsset.name} then installing v${newVersion}`,
+      version: newVersion,
+    });
+  } catch (err) {
+    try { fs.rmSync(scratchDir, { recursive: true, force: true }); } catch (_) {}
+    try { fs.rmSync(stagingDir, { recursive: true, force: true }); } catch (_) {}
+    res.status(500).json({ error: err.message });
   }
 });
 

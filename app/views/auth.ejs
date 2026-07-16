@@ -111,10 +111,10 @@
     <label for="u">Username</label>
     <input id="u" name="username" required autofocus autocomplete="username" spellcheck="false">
     <label for="p">4-digit PIN</label>
-    <input id="p" name="pin" class="pin" required inputmode="numeric" pattern="\d{4}" maxlength="4" autocomplete="<%= mode === 'setup' ? 'new-password' : 'current-password' %>">
+    <input id="p" name="pin" type="password" class="pin" required inputmode="numeric" pattern="\d{4}" maxlength="4" autocomplete="<%= mode === 'setup' ? 'new-password' : 'current-password' %>">
     <% if (mode === 'setup') { %>
       <label for="p2">Confirm PIN</label>
-      <input id="p2" name="pin2" class="pin" required inputmode="numeric" pattern="\d{4}" maxlength="4" autocomplete="new-password">
+      <input id="p2" name="pin2" type="password" class="pin" required inputmode="numeric" pattern="\d{4}" maxlength="4" autocomplete="new-password">
     <% } %>
     <button type="submit" id="go"><%= mode === 'setup' ? 'Create admin' : 'Sign in' %></button>
     <div class="msg err" id="err"></div>

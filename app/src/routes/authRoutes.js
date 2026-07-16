@@ -41,7 +41,8 @@ router.post('/setup', async (req, res) => {
   try {
     if (!(await auth.needsSetup())) return res.status(409).json({ error: 'Setup already complete' });
     const { username, pin } = req.body || {};
-    const id = await auth.createUser({ username, pin, roleName: auth.ADMIN_ROLE.name });
+    // First admin picks their own PIN in the setup form — no forced change.
+    const id = await auth.createUser({ username, pin, roleName: auth.ADMIN_ROLE.name, mustChangePin: false });
     const token = await auth.createSession(id, req.headers['user-agent']);
     res.cookie(auth.SESSION_COOKIE, token, cookieOpts(req));
     await auth.audit({ userId: id, username }, 'auth.setup', String(id));
@@ -56,11 +57,26 @@ router.post('/login', async (req, res) => {
     const token = await auth.createSession(u.userId, req.headers['user-agent']);
     res.cookie(auth.SESSION_COOKIE, token, cookieOpts(req));
     await auth.audit(u, 'auth.login', String(u.userId));
-    res.json({ ok: true, username: u.username, role: u.role, permissions: u.permissions });
+    res.json({
+      ok: true, username: u.username, role: u.role, permissions: u.permissions,
+      mustChangePin: !!u.mustChangePin,
+    });
   } catch (e) {
     await auth.audit(null, 'auth.login.fail', (req.body && req.body.username) || null, { reason: e.message });
     res.status(401).json({ error: e.message });
   }
+});
+
+// Self-service PIN change (avatar menu → Change PIN). Also handles the forced
+// change after an admin reset — same endpoint, same validation.
+router.post('/change-pin', requireAuth, async (req, res) => {
+  try {
+    const { currentPin, newPin } = req.body || {};
+    if (!currentPin || !newPin) return res.status(400).json({ error: 'currentPin and newPin are required' });
+    await auth.changeOwnPin(req.user.userId, currentPin, newPin, req.user.token);
+    await auth.audit(req.user, 'auth.pin.change', String(req.user.userId));
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 router.post('/logout', async (req, res) => {
@@ -83,6 +99,7 @@ router.get('/me', requireAuth, (req, res) => {
     username: req.user.username,
     role: req.user.role,
     permissions: req.user.permissions,
+    mustChangePin: !!req.user.mustChangePin,
     permissionCatalog: auth.PERMISSIONS,
   });
 });

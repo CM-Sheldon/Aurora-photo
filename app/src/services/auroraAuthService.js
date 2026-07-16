@@ -101,7 +101,11 @@ function validatePin(pin) {
   return s;
 }
 
-async function createUser({ username, pin, roleName }) {
+// mustChangePin flags a user whose initial PIN was picked by someone else
+// (admin-created accounts, admin-reset PINs). They're forced through the
+// change-PIN screen on next sign-in. The very first admin (setup flow) picks
+// their own PIN so mustChangePin is false there.
+async function createUser({ username, pin, roleName, mustChangePin = true }) {
   username = validateUsername(username);
   pin = validatePin(pin);
   const role = await db.get(`SELECT id FROM roles WHERE name = ?`, [roleName]);
@@ -110,27 +114,29 @@ async function createUser({ username, pin, roleName }) {
   const hash = await hashPin(pin, salt);
   const now = Date.now();
   const r = await db.run(
-    `INSERT INTO users (username, pin_hash, pin_salt, role_id, created_at) VALUES (?, ?, ?, ?, ?)`,
-    [username, hash, salt, role.id, now]);
+    `INSERT INTO users (username, pin_hash, pin_salt, role_id, created_at, must_change_pin) VALUES (?, ?, ?, ?, ?, ?)`,
+    [username, hash, salt, role.id, now, mustChangePin ? 1 : 0]);
   return r.lastID;
 }
 
 async function getUserById(id) {
   return db.get(`
     SELECT u.id, u.username, u.disabled, u.created_at, u.last_seen_at,
-           u.locked_until, u.failed_attempts, r.id AS role_id, r.name AS role_name, r.permissions
+           u.locked_until, u.failed_attempts, u.must_change_pin,
+           r.id AS role_id, r.name AS role_name, r.permissions
     FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?`, [id]);
 }
 async function getUserByName(name) {
   return db.get(`
     SELECT u.id, u.username, u.pin_hash, u.pin_salt, u.disabled,
-           u.locked_until, u.failed_attempts, r.id AS role_id, r.name AS role_name, r.permissions
+           u.locked_until, u.failed_attempts, u.must_change_pin,
+           r.id AS role_id, r.name AS role_name, r.permissions
     FROM users u JOIN roles r ON r.id = u.role_id WHERE u.username = ?`, [name]);
 }
 async function listUsers() {
   return db.all(`
     SELECT u.id, u.username, u.disabled, u.created_at, u.last_seen_at, u.locked_until,
-           r.name AS role_name
+           u.must_change_pin, r.name AS role_name
     FROM users u JOIN roles r ON r.id = u.role_id
     ORDER BY u.username COLLATE NOCASE`);
 }
@@ -154,14 +160,40 @@ async function setUserDisabled(userId, disabled) {
   await db.run(`UPDATE users SET disabled = ? WHERE id = ?`, [disabled ? 1 : 0, userId]);
   if (disabled) await deleteSessionsForUser(userId);
 }
+// Admin-initiated PIN reset — sets must_change_pin so the user picks their
+// own PIN the next time they sign in. Also invalidates every existing session
+// for the user so old devices can't keep the reset PIN on file.
 async function resetUserPin(userId, newPin) {
   newPin = validatePin(newPin);
   const salt = randSalt();
   const hash = await hashPin(newPin, salt);
   await db.run(
-    `UPDATE users SET pin_hash = ?, pin_salt = ?, failed_attempts = 0, locked_until = 0 WHERE id = ?`,
+    `UPDATE users SET pin_hash = ?, pin_salt = ?, failed_attempts = 0, locked_until = 0, must_change_pin = 1 WHERE id = ?`,
     [hash, salt, userId]);
   await deleteSessionsForUser(userId);
+}
+
+// Self-service PIN change from the avatar menu — requires the current PIN
+// so a stolen session can't quietly rotate the password. Clears
+// must_change_pin. Keeps the current session (so the user isn't kicked out
+// on their own device) but drops every *other* session for the account.
+async function changeOwnPin(userId, currentPin, newPin, keepSessionToken) {
+  newPin = validatePin(newPin);
+  const u = await db.get(`SELECT id, username, pin_hash, pin_salt FROM users WHERE id = ?`, [userId]);
+  if (!u) throw new Error('User not found');
+  const attempt = await hashPin(currentPin, u.pin_salt);
+  if (!safeEq(attempt, u.pin_hash)) throw new Error('Current PIN is wrong');
+  if (String(currentPin) === String(newPin)) throw new Error('New PIN must be different');
+  const salt = randSalt();
+  const hash = await hashPin(newPin, salt);
+  await db.run(
+    `UPDATE users SET pin_hash = ?, pin_salt = ?, failed_attempts = 0, locked_until = 0, must_change_pin = 0 WHERE id = ?`,
+    [hash, salt, userId]);
+  if (keepSessionToken) {
+    await db.run(`DELETE FROM sessions WHERE user_id = ? AND token != ?`, [userId, keepSessionToken]);
+  } else {
+    await deleteSessionsForUser(userId);
+  }
 }
 async function deleteUser(userId) {
   await assertNotLastAdmin(userId);
@@ -231,7 +263,8 @@ async function getSession(token) {
   if (!token) return null;
   const row = await db.get(`
     SELECT s.token, s.user_id, s.expires_at,
-           u.username, u.disabled, r.name AS role_name, r.permissions
+           u.username, u.disabled, u.must_change_pin,
+           r.name AS role_name, r.permissions
     FROM sessions s
     JOIN users u ON u.id = s.user_id
     JOIN roles r ON r.id = u.role_id
@@ -247,6 +280,7 @@ async function getSession(token) {
     username: row.username,
     role: row.role_name,
     permissions: JSON.parse(row.permissions || '[]'),
+    mustChangePin: !!row.must_change_pin,
   };
 }
 async function touchSession(token) {
@@ -291,6 +325,7 @@ async function verifyPin(username, pin) {
     username: u.username,
     role: u.role_name,
     permissions: JSON.parse(u.permissions || '[]'),
+    mustChangePin: !!u.must_change_pin,
   };
 }
 
@@ -319,7 +354,7 @@ module.exports = {
   PERMISSIONS, ALL_PERMS, ADMIN_ROLE, USER_ROLE,
   SESSION_COOKIE, SESSION_TTL_MS,
   ensureBuiltinRoles, needsSetup, countAdmins,
-  createUser, getUserById, listUsers, setUserRole, setUserDisabled, resetUserPin, deleteUser,
+  createUser, getUserById, listUsers, setUserRole, setUserDisabled, resetUserPin, changeOwnPin, deleteUser,
   listRoles, createRole, updateRole, deleteRole,
   createSession, getSession, touchSession, deleteSession, deleteSessionsForUser, pruneExpiredSessions,
   verifyPin, audit, listAudit,
