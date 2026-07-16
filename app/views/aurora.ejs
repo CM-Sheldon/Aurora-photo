@@ -135,8 +135,14 @@
     body.sidebar-collapsed .sidebar-logo { padding: 22px 0 18px; justify-content: center; }
     body.sidebar-collapsed .sidebar-logo > div:not(.logo-icon) { display: none; }
     body.sidebar-collapsed .sidebar-nav { padding: 12px 8px; }
-    body.sidebar-collapsed .nav-item { justify-content: center; padding: 10px 6px; gap: 0; }
-    body.sidebar-collapsed .nav-item > *:not(.nav-icon) { display: none; }
+    body.sidebar-collapsed .nav-item { justify-content: center; padding: 10px 6px; gap: 0; overflow: hidden; }
+    /* When collapsed, show icons only — labels and badges disappear and any
+       bare text nodes are zeroed out via font-size:0 so no "L" or "S" leaks
+       through next to the icon. The icon itself restores its font-size. */
+    body.sidebar-collapsed .nav-item { font-size: 0; }
+    body.sidebar-collapsed .nav-item .nav-icon { font-size: 15px; }
+    body.sidebar-collapsed .nav-item .nav-label,
+    body.sidebar-collapsed .nav-item .nav-badge { display: none; }
     body.sidebar-collapsed .nav-section { display: none; }
     body.sidebar-collapsed .sidebar-stats { display: none; }
     body.sidebar-collapsed .nav-item[data-tip]:hover::after {
@@ -175,7 +181,8 @@
       width: 2px; border-radius: 2px; background: var(--accent);
       box-shadow: 0 0 8px var(--accent-glow);
     }
-    .nav-icon { width: 18px; text-align: center; font-size: 15px; }
+    .nav-icon { width: 18px; text-align: center; font-size: 15px; flex-shrink: 0; }
+    .nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .nav-badge {
       margin-left: auto; font-family: var(--font-mono);
       font-size: 10px; color: var(--text-faint); letter-spacing: 0.5px;
@@ -1374,22 +1381,22 @@
 
       <nav class="sidebar-nav">
         <div class="nav-item active" data-screen="library" data-tip="Library">
-          <span class="nav-icon">▦</span> Library
+          <span class="nav-icon">▦</span><span class="nav-label">Library</span>
           <span class="nav-badge" id="navBadgeLibrary">—</span>
         </div>
         <div class="nav-item" data-screen="places" data-tip="Places">
-          <span class="nav-icon">◎</span> Places
+          <span class="nav-icon">◎</span><span class="nav-label">Places</span>
           <span class="nav-badge" id="navBadgePlaces">—</span>
         </div>
         <div class="nav-item" data-screen="search" data-tip="Search">
-          <span class="nav-icon">⌕</span> Search
+          <span class="nav-icon">⌕</span><span class="nav-label">Search</span>
         </div>
         <div class="nav-item" data-screen="albums" data-tip="Albums">
-          <span class="nav-icon">⊞</span> Albums
+          <span class="nav-icon">⊞</span><span class="nav-label">Albums</span>
         </div>
         <div class="nav-section" data-perm-any="settings.view users.manage audit.view photos.hidden">System</div>
         <div class="nav-item" data-screen="settings" data-perm-any="settings.view users.manage audit.view photos.hidden" data-tip="Settings &amp; Import">
-          <span class="nav-icon">⚙</span> Settings &amp; Import
+          <span class="nav-icon">⚙</span><span class="nav-label">Settings &amp; Import</span>
         </div>
       </nav>
 
@@ -2052,9 +2059,12 @@
     window.__auroraPerf = { build: AURORA_BUILD, previewsCreated: 0, lastPointerType: '—' };
     console.log('[Aurora] page build', AURORA_BUILD);
 
-    // Stale-build detector: if the live server build differs from what's baked into
-    // this (possibly cached) page, the SW served an old copy — offer a reload.
-    (async () => {
+    // Stale-build detector: if the live server build differs from what's baked
+    // into this (possibly cached) page, the SW served an old copy — surface a
+    // reload banner. We also poll every 60s and on visibilitychange so a tab
+    // that was open BEFORE the in-app updater ran flips over to the new
+    // version on its own instead of quietly staying on stale code.
+    async function checkServerBuild() {
       try {
         const srv = await fetch('/api/aurora/version', { cache: 'no-store' }).then(r => r.json());
         if (srv && srv.build && srv.build !== PAGE_BUILD) {
@@ -2062,7 +2072,12 @@
           showUpdateBanner(srv);
         }
       } catch (_) {}
-    })();
+    }
+    checkServerBuild();
+    setInterval(checkServerBuild, 60 * 1000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') checkServerBuild();
+    });
     function showUpdateBanner(srv) {
       if (document.getElementById('updateBanner')) return;
       const b = document.createElement('div');
@@ -5145,11 +5160,14 @@
 
           if (s.status === 'complete') {
             clearInterval(updatePoller); updatePoller = null;
-            setUpdateStatus('✓ ' + msg, 'ok');
+            setUpdateStatus('✓ ' + msg + ' — clearing cache and reloading…', 'ok');
             const gb = document.getElementById('updateApplyBtn'); if (gb) gb.disabled = false;
             const lb = document.getElementById('updateApplyLocalBtn'); if (lb) lb.disabled = false;
-            // Reload the page after a moment so the new version is reflected
-            setTimeout(() => location.reload(), 2000);
+            // hardReload() drops every cache + unregisters the SW BEFORE
+            // reloading — a plain location.reload() left the old page shell,
+            // stale JS and cached /me response in place, so the user was
+            // "still on" the old version until they manually cleared cache.
+            setTimeout(() => hardReload(), 1500);
           } else if (s.status === 'error') {
             clearInterval(updatePoller); updatePoller = null;
             setUpdateStatus('✗ ' + msg, 'err');

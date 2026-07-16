@@ -364,9 +364,17 @@ async function startImport(sourcePath, sessionId, opts = {}) {
         [Date.now(), 'complete', session.scanned, session.indexed, session.skipped, session.errors, sessionId]
       ).catch(() => {});
 
-      // Kick off background thumbnail warming so browsing is instant
+      // Kick off background thumbnail warming so browsing is instant.
+      // If a boot-time warmer is still sweeping the pre-import library, it
+      // sets rerun=true so a fresh pass runs after it finishes and picks up
+      // the newly-imported photos (see startThumbnailWarming).
       // (AURORA_NO_AUTOWARM lets tests/ops isolate the indexing phase)
-      if (process.env.AURORA_NO_AUTOWARM !== '1') startThumbnailWarming();
+      if (process.env.AURORA_NO_AUTOWARM !== '1') {
+        const w = startThumbnailWarming();
+        pushLog(session, w.running && w.phase !== 'idle'
+          ? 'Thumbnail warmer is still running — will re-sweep once it finishes so new photos get thumbnails.'
+          : 'Thumbnail warmer started.');
+      }
     } catch (err) {
       session.status = 'error';
       pushLog(session, `Fatal: ${err.message}`);
@@ -402,8 +410,14 @@ async function warmBatch(rows) {
 }
 
 async function startThumbnailWarming() {
-  if (warmState.running) return warmState;
+  // If another warmer is already running (e.g. the boot warmer started 8s
+  // after startup and an import completes 30s later), remember that we should
+  // re-sweep as soon as it finishes. Otherwise the running warmer would iterate
+  // past the offsets where the newly-imported photos landed and miss them
+  // until the next service restart.
+  if (warmState.running) { warmState.rerun = true; return warmState; }
   warmState.running = true;
+  warmState.rerun = false;
   warmState.done = 0;
   warmState.generated = 0;
 
@@ -437,6 +451,12 @@ async function startThumbnailWarming() {
       // server.js wires it up. Fires only on a clean completion.
       if (warmState.phase === 'complete' && onWarmingComplete) {
         try { onWarmingComplete(); } catch (_) {}
+      }
+      // A re-run was requested while we were sweeping — go again so any
+      // photos imported mid-pass get their thumbnails.
+      if (warmState.rerun) {
+        warmState.rerun = false;
+        setImmediate(() => startThumbnailWarming());
       }
     }
   })();

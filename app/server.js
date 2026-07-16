@@ -142,6 +142,10 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
     console.log('Aurora database initialized');
 
     // Warm thumbnails in the background once there's a library (resumable).
+    // The import path also calls startThumbnailWarming when it completes; this
+    // covers the case where the service was restarted mid-warm (or the DB
+    // just gained its first assets from a background scanner) so warming
+    // resumes without waiting for the user to re-import.
     setTimeout(async () => {
       try {
         const n = await auroraDb.get('SELECT COUNT(*) c FROM assets');

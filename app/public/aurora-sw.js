@@ -5,7 +5,7 @@
  * previous cache-first strategy meant updates didn't show until a couple of
  * reloads later — bump SHELL_CACHE whenever that behaviour needs resetting.
  * Media/thumbnails/API are never cached. */
-const SHELL_CACHE = 'aurora-shell-v3';
+const SHELL_CACHE = 'aurora-shell-v4';
 const SHELL_ASSETS = [
   '/aurora',
   '/aurora-manifest.json',
