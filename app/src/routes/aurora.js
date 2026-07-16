@@ -933,7 +933,7 @@ router.post('/tags/for-assets', async (req, res) => {
 });
 
 // POST /api/aurora/fav/:id
-router.post('/fav/:id', async (req, res) => {
+router.post('/fav/:id', requirePerm('photos.favorite'), async (req, res) => {
   try {
     const asset = await db.get('SELECT id, fav FROM assets WHERE id = ?', [req.params.id]);
     if (!asset) return res.status(404).json({ error: 'Not found' });

@@ -38,6 +38,11 @@
     }
 
     html, body { height: 100%; overflow: hidden; }
+    /* Set the background on <html> too so any browser-chrome bleed on iOS PWAs
+       (safe-area gaps around the notch / home indicator) reads as the app
+       colour, not white. Without this the standalone PWA can flash white on
+       load and shows visible seams around the status bar. */
+    html { background: var(--void); }
     body {
       background: var(--void);
       color: var(--text);
@@ -85,7 +90,13 @@
     /* Layout */
     .app {
       position: relative; z-index: 1;
-      display: flex; height: 100vh; width: 100vw;
+      display: flex; width: 100vw;
+      /* Use dvh so iOS PWA / mobile Safari don't leave a slice of unused
+         viewport at top/bottom when the URL bar or system chrome shifts.
+         100vh is a fixed value on iOS and doesn't track the visible viewport
+         once the shell is in standalone mode. */
+      height: 100vh;   /* fallback */
+      height: 100dvh;
     }
 
     /* Sidebar */
@@ -931,6 +942,34 @@
       .import-field { min-width: 100%; }
       .kpi-row { grid-template-columns: repeat(2, 1fr); }
 
+      /* Settings: tighten padding, single-column cards, keep wide bits scrollable
+         so nothing forces horizontal page scroll on a 375px screen. */
+      .settings-content { padding: 14px; }
+      .settings-grid { grid-template-columns: 1fr; gap: 10px; }
+      .settings-card, .import-card { padding: 14px 16px; }
+      .import-card { padding: 16px; }
+      .settings-section-title { margin: 20px 0 10px; }
+      .settings-row { flex-wrap: wrap; }
+      .settings-val { text-align: left; word-break: break-word; }
+      .import-field-row { flex-direction: column; gap: 8px; }
+      .import-field { min-width: 100%; max-width: 100% !important; }
+      .update-row { flex-direction: column; align-items: stretch; }
+      .update-row input[type=text] { min-width: 0; width: 100%; }
+      /* Sub-tab bar: nudge padding to fit more chips before it needs to scroll,
+         and hide its scrollbar (it still swipes). */
+      .settings-tabs { margin-bottom: 14px; -webkit-overflow-scrolling: touch; }
+      .settings-tabs::-webkit-scrollbar { display: none; }
+      .stab { padding: 9px 12px; font-size: 12.5px; }
+      /* RBAC & audit tables — let the row scroll horizontally rather than
+         squishing every column into unreadable widths. */
+      .rbac-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .rbac-table { min-width: 480px; }
+      /* Duplicate scanner thumbs — smaller so more fit per row. */
+      .dup-item { width: 76px; }
+      .dup-thumb { width: 68px; height: 68px; }
+      /* Passcode card was a fixed 320px which is tight on 320px devices. */
+      .passcode-card { padding: 24px 20px; }
+
       /* Albums tighter */
       .smart-albums { grid-template-columns: 1fr 1fr; }
       .events-grid { grid-template-columns: repeat(2, 1fr); }
@@ -952,9 +991,17 @@
       .aurora-bg span { filter: blur(80px); }  /* cheaper blur on mobile GPUs */
     }
 
-    /* Standalone PWA: extra safe-area padding when launched from home screen */
+    /* Standalone PWA: extra safe-area padding when launched from home screen.
+       On iOS the frame is drawn under the notch/home indicator (we set
+       apple-mobile-web-app-status-bar-style=black-translucent + viewport-fit=
+       cover). Push the top bar down past the notch and lift the bottom nav
+       above the home indicator so nothing important lives in the OS-reserved
+       zones — but keep the app background filling those zones so they don't
+       read as a white bar. */
     @media (display-mode: standalone) {
+      html, body { background: var(--void); }
       .topbar { padding-top: max(14px, env(safe-area-inset-top)); }
+      .bottom-nav { padding-bottom: max(6px, env(safe-area-inset-bottom)); }
     }
 
     /* ── Settings sub-tabs ── */
@@ -1766,17 +1813,17 @@
             <div class="import-card">
               <div class="import-card-title">Users</div>
               <div class="card-help">Add people who can sign in to Aurora. Each user gets a role that decides what they can do.</div>
-              <table class="rbac-table" id="usersTable"><thead>
+              <div class="rbac-table-wrap"><table class="rbac-table" id="usersTable"><thead>
                 <tr><th>Username</th><th>Role</th><th>Status</th><th>Last seen</th><th></th></tr>
-              </thead><tbody><tr><td colspan="5" style="color:var(--text-faint);">Loading…</td></tr></tbody></table>
+              </thead><tbody><tr><td colspan="5" style="color:var(--text-faint);">Loading…</td></tr></tbody></table></div>
               <button class="btn" style="margin-top:12px;" onclick="openUserAddDialog()">+ Add user</button>
             </div>
             <div class="import-card">
               <div class="import-card-title">Roles</div>
               <div class="card-help">Built-in <b>admin</b> and <b>user</b> roles cover most needs. Create custom roles for finer-grained permissions.</div>
-              <table class="rbac-table" id="rolesTable"><thead>
+              <div class="rbac-table-wrap"><table class="rbac-table" id="rolesTable"><thead>
                 <tr><th>Name</th><th>Type</th><th>Permissions</th><th></th></tr>
-              </thead><tbody><tr><td colspan="4" style="color:var(--text-faint);">Loading…</td></tr></tbody></table>
+              </thead><tbody><tr><td colspan="4" style="color:var(--text-faint);">Loading…</td></tr></tbody></table></div>
               <button class="btn" style="margin-top:12px;" onclick="openRoleDialog()">+ New role</button>
             </div>
           </div>
@@ -1786,9 +1833,9 @@
             <div class="import-card">
               <div class="import-card-title">Recent activity</div>
               <div class="card-help">Every login, user/role change, and destructive action is logged here.</div>
-              <table class="rbac-table" id="auditTable"><thead>
+              <div class="rbac-table-wrap"><table class="rbac-table" id="auditTable"><thead>
                 <tr><th>When</th><th>User</th><th>Action</th><th>Target</th><th>Details</th></tr>
-              </thead><tbody><tr><td colspan="5" style="color:var(--text-faint);">Loading…</td></tr></tbody></table>
+              </thead><tbody><tr><td colspan="5" style="color:var(--text-faint);">Loading…</td></tr></tbody></table></div>
               <button class="btn btn-ghost" style="margin-top:12px;" onclick="loadAudit()">↻ Refresh</button>
             </div>
           </div>
@@ -1851,7 +1898,7 @@
         <div class="lightbox-title" id="lightboxTitle"></div>
         <div class="lb-actions">
           <button class="lb-btn" id="lbLiveBtn" onclick="playLive()" title="Play Live Photo" style="display:none;">◉</button>
-          <button class="lb-btn" id="lbFavBtn" onclick="lightboxToggleFav()" title="Favourite">♡</button>
+          <button class="lb-btn" id="lbFavBtn" data-perm="photos.favorite" onclick="lightboxToggleFav()" title="Favourite">♡</button>
           <button class="lb-btn" id="lbFitBtn" onclick="toggleLightboxFit()" title="Fit / Fill">⤢</button>
           <button class="lb-btn" id="lbInfoBtn" onclick="toggleMetaPanel()" title="Info">ⓘ</button>
         </div>
@@ -2403,19 +2450,24 @@
       overlay.appendChild(dateEl);
       tile.appendChild(overlay);
 
-      const favBtn = document.createElement('div');
-      favBtn.className = 'tile-fav';
-      favBtn.textContent = item.fav ? '♥' : '♡';
-      favBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        try {
-          const res = await fetch(`/api/aurora/fav/${item.id}`, { method: 'POST' }).then(r => r.json());
-          item.fav = res.fav;
-          tile.classList.toggle('faved', !!res.fav);
-          favBtn.textContent = res.fav ? '♥' : '♡';
-        } catch(_) {}
-      });
-      tile.appendChild(favBtn);
+      // Only render the ♥ button if the current role has photos.favorite;
+      // the server also enforces this (POST /fav/:id → requirePerm), so hiding
+      // here is purely so nothing that would 403 is offered.
+      if (havePerm('photos.favorite')) {
+        const favBtn = document.createElement('div');
+        favBtn.className = 'tile-fav';
+        favBtn.textContent = item.fav ? '♥' : '♡';
+        favBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          try {
+            const res = await fetch(`/api/aurora/fav/${item.id}`, { method: 'POST' }).then(r => r.json());
+            item.fav = res.fav;
+            tile.classList.toggle('faved', !!res.fav);
+            favBtn.textContent = res.fav ? '♥' : '♡';
+          } catch(_) {}
+        });
+        tile.appendChild(favBtn);
+      }
 
       // Outside select mode: tap opens the lightbox. In select mode, selection is
       // driven by the pointer handlers below (tap = toggle one, drag = sweep).
@@ -3278,7 +3330,11 @@
     async function renderWorldMap() {
       if (worldMapRendered) return;
       try {
-        const wm = await fetch('/api/aurora/worldmap').then(r => r.json());
+        // Cache-bust with PAGE_BUILD: /worldmap has a 24h public cache, so an
+        // updated projection (e.g. the antimeridian fix in 1.6.5) would keep
+        // serving stale JSON to any browser that hit the endpoint yesterday.
+        // Rolling the query on every build makes each release fetch fresh.
+        const wm = await fetch('/api/aurora/worldmap?v=' + encodeURIComponent(PAGE_BUILD)).then(r => r.json());
         const svg = document.getElementById('worldMap');
         let s = '';
         for (const d of wm.paths) s += '<path d="' + d + '"/>';

@@ -18,13 +18,95 @@ function project(lon, lat) {
   return [x, y];
 }
 
+// A "crossing" is any pair of adjacent points whose longitudes differ by more
+// than 180°. In Natural Earth data (world-atlas 110m) this happens when a
+// polygon straddles the antimeridian: e.g. Russia's mainland ring includes
+// the segment (178.6, 69.4) → (-180.0, 69.0), which if drawn naively becomes
+// a line running clean across the whole map from far right to far left.
+const ANTIMERIDIAN_DEG = 180;
+
+// Latitude of the antimeridian crossing between two points. Uses linear
+// interpolation on the shortest-path lon distance. For points that lie
+// exactly on ±180 (Natural Earth encodes many antimeridian polygons with
+// boundary vertices at the pole), this reduces to lat2 or lat1.
+function crossingLat(lon1, lat1, lon2, lat2) {
+  let adj = lon2;
+  if (lon2 - lon1 > ANTIMERIDIAN_DEG) adj = lon2 - 360;
+  else if (lon2 - lon1 < -ANTIMERIDIAN_DEG) adj = lon2 + 360;
+  const span = adj - lon1;
+  if (span === 0) return (lat1 + lat2) / 2;
+  const bound = span > 0 ? 180 : -180;
+  const t = (bound - lon1) / span;
+  return lat1 + t * (lat2 - lat1);
+}
+
+// Split a ring at every antimeridian crossing and emit one closed SVG
+// subpath per resulting side. Segments that end up on the same side of the
+// antimeridian (the ring's start and end always are, since a closed ring
+// starts and ends on one side) are stitched together so we don't leak a
+// diagonal Z-close line back to the ring's first point.
+//
+// The vertical closing edge introduced by the split sits on x=0 (for -180)
+// or x=1000 (for +180) — the exact edge of the projected canvas — so it is
+// visually invisible in a full-world view and clipped by the SVG viewBox in
+// any zoomed-in view.
 function ringToPath(ring) {
-  let d = '';
-  for (let i = 0; i < ring.length; i++) {
-    const [x, y] = project(ring[i][0], ring[i][1]);
-    d += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ' ' + y.toFixed(1);
+  // First pass: find every crossing.
+  const crossings = [];
+  for (let i = 1; i < ring.length; i++) {
+    const dLon = ring[i][0] - ring[i - 1][0];
+    if (Math.abs(dLon) > ANTIMERIDIAN_DEG) crossings.push(i);
   }
-  return d + 'Z';
+
+  // Fast path: no crossings, emit a single M…L…Z as before.
+  if (crossings.length === 0) {
+    let d = '';
+    for (let i = 0; i < ring.length; i++) {
+      const [x, y] = project(ring[i][0], ring[i][1]);
+      d += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ' ' + y.toFixed(1);
+    }
+    return d + 'Z';
+  }
+
+  // Build one segment (array of [lon, lat]) per side of the antimeridian.
+  // At each crossing, close the current segment with a boundary point at
+  // ±180 and open the next segment with the mirror boundary point at ∓180.
+  const segments = [];
+  let seg = [ring[0]];
+  for (let i = 1; i < ring.length; i++) {
+    const [lon1, lat1] = ring[i - 1];
+    const [lon2, lat2] = ring[i];
+    if (Math.abs(lon2 - lon1) > ANTIMERIDIAN_DEG) {
+      const midLat = crossingLat(lon1, lat1, lon2, lat2);
+      const exitLon = lon1 >= 0 ? 180 : -180;
+      seg.push([exitLon, midLat]);
+      segments.push(seg);
+      seg = [[-exitLon, midLat]];
+    }
+    seg.push(ring[i]);
+  }
+  segments.push(seg);
+
+  // The ring is closed, so segments[0] and segments[N-1] are on the same
+  // side of the antimeridian. Merge them into one loop (drop the duplicated
+  // ring[0] where they meet) so each emitted subpath is a self-contained
+  // closed polygon that closes via the antimeridian edge, not via a
+  // diagonal back to the ring's first point.
+  if (segments.length > 1) {
+    const first = segments.shift();
+    segments[segments.length - 1] = segments[segments.length - 1].concat(first.slice(1));
+  }
+
+  let d = '';
+  for (const s of segments) {
+    if (s.length < 2) continue;
+    for (let i = 0; i < s.length; i++) {
+      const [x, y] = project(s[i][0], s[i][1]);
+      d += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ' ' + y.toFixed(1);
+    }
+    d += 'Z';
+  }
+  return d;
 }
 
 function geometryToPath(geom) {
