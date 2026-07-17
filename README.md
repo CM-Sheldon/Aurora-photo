@@ -40,11 +40,6 @@ Prefer to download the zip yourself? See [Install (manual)](#install-manual) bel
 
 ## Highlights
 
-- **Users, roles & audit log** — first visitor to a fresh install claims the admin
-  account (username + 4-digit PIN). Admin can add more users, hand out custom roles
-  from an ACL checkbox tree (settings access, hidden-album access, tagging rights,
-  download originals, delete, etc.), reset PINs, and see who did what in an audit
-  log. Two roles ship built-in: `admin` (everything) and `user` (view + favorite).
 - **Tags & smart tagging** — tag any photo from its info panel. Tag one photo of a
   trip (e.g. *Cyprus Holiday 2024*) and Aurora finds the rest of that trip (same
   place, same stretch of dates) and offers to tag them all in one click. Manage,
@@ -66,6 +61,11 @@ Prefer to download the zip yourself? See [Install (manual)](#install-manual) bel
   preview, then **View all** to open the full set in the search results page.
 - **Live Photos** play their motion clip directly over the still.
 - **Settings & Import** live on one screen, with clear actions and instant feedback.
+- **Users, roles & audit log** — first visitor to a fresh install claims the admin
+  account (username + 4-digit PIN). Admin can add more users, hand out custom roles
+  from an ACL checkbox tree (settings access, hidden-album access, tagging rights,
+  download originals, delete, etc.), reset PINs, and see who did what in an audit
+  log. Two roles ship built-in: `admin` (everything) and `user` (view + favorite).
 
 ## Directory layout
 
