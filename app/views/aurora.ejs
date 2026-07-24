@@ -276,6 +276,50 @@
     }
     .hist-bar.in-range { background: rgba(167,139,250,0.6); }
 
+    /* ── Dual-thumb time-range slider ──
+       Both range inputs sit on ONE full-width track. The inputs themselves are
+       pointer-transparent; only their thumbs take pointer events, so each thumb
+       can be dragged anywhere along the track. The fill bar between the thumbs
+       is sized from JS (updateDualRange) with thumb-width compensation so it
+       lines up with the thumb centres. */
+    .dual-range { flex: 1; display: flex; flex-direction: column; gap: 3px; align-items: stretch; height: auto; }
+    .dual-track { position: relative; height: 24px; }
+    .dual-track::before {
+      content: ''; position: absolute; left: 0; right: 0; top: 50%;
+      height: 5px; transform: translateY(-50%);
+      background: var(--border); border-radius: 3px;
+    }
+    .dual-fill {
+      position: absolute; top: 50%; height: 5px; transform: translateY(-50%);
+      background: linear-gradient(90deg, rgba(167,139,250,0.55), var(--accent));
+      border-radius: 3px; pointer-events: none;
+      box-shadow: 0 0 8px var(--accent-glow);
+    }
+    .dual-track input[type=range] {
+      position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+      width: 100%; margin: 0; height: 24px;
+      background: transparent; pointer-events: none;
+    }
+    .dual-track input[type=range]::-webkit-slider-runnable-track { background: transparent; }
+    .dual-track input[type=range]::-moz-range-track { background: transparent; }
+    .dual-track input[type=range]::-webkit-slider-thumb { pointer-events: auto; }
+    .dual-track input[type=range]::-moz-range-thumb { pointer-events: auto; }
+    .range-ticks { position: relative; height: 12px; pointer-events: none; }
+    .range-tick {
+      position: absolute; top: 0; transform: translateX(-50%);
+      font-family: var(--font-mono); font-size: 9px; color: var(--text-faint);
+      letter-spacing: 0.5px;
+    }
+    button.slider-value { background: none; border: none; padding: 0; cursor: default; }
+    button.slider-value.narrowed { cursor: pointer; }
+    button.slider-value.narrowed:hover { text-decoration: underline; }
+    /* Touch: bigger thumbs + taller track so fingers can hit them */
+    @media (pointer: coarse) {
+      .dual-track, .dual-track input[type=range] { height: 32px; }
+      .dual-track input[type=range]::-webkit-slider-thumb { width: 24px; height: 24px; }
+      .dual-track input[type=range]::-moz-range-thumb { width: 24px; height: 24px; }
+    }
+
     .grid-density-row { display: flex; align-items: center; gap: 12px; }
     .density-label { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
     #densitySlider { width: 140px; }
@@ -1428,14 +1472,16 @@
         <div class="library-controls">
           <div class="slider-row">
             <span class="slider-label">Time range</span>
-            <div class="range-wrap" style="flex-direction: column; gap: 4px; align-items: stretch; height: auto;">
+            <div class="range-wrap dual-range">
               <div class="histogram" id="histogram"></div>
-              <div style="display:flex; gap:8px;">
-                <input type="range" id="timeFrom" min="0" max="100" value="0">
-                <input type="range" id="timeTo" min="0" max="100" value="100">
+              <div class="dual-track" id="dualTrack">
+                <div class="dual-fill" id="dualFill"></div>
+                <input type="range" id="timeFrom" min="0" max="100" value="0" aria-label="Range start">
+                <input type="range" id="timeTo" min="0" max="100" value="100" aria-label="Range end">
               </div>
+              <div class="range-ticks" id="rangeTicks"></div>
             </div>
-            <span class="slider-value" id="timeRangeLabel">All time</span>
+            <button class="slider-value" id="timeRangeLabel" type="button" title="Reset to all time">All time</button>
           </div>
           <div class="grid-density-row">
             <span class="density-label">Grid size</span>
@@ -2263,6 +2309,7 @@
         updateTimeLabel();
 
         buildHistogram();
+        buildRangeTicks();
         applyFilters();
       } catch(_) {
         // Network/parse failure — dismiss the spinner and fall back to the empty
@@ -2887,14 +2934,66 @@
     // ── Sliders ──
     const timeFrom = document.getElementById('timeFrom');
     const timeTo = document.getElementById('timeTo');
+    const dualFill = document.getElementById('dualFill');
+
+    // Position the fill bar between the two thumb centres. A range thumb at
+    // value v sits at v% of (track − thumb), not v% of the track, so compensate
+    // by the 18px thumb width or the fill drifts off the thumbs near the edges.
+    function updateDualRange() {
+      const max = Math.max(1, state.totalMonths - 1);
+      const a = (state.fromMonth / max) * 100, b = (state.toMonth / max) * 100;
+      dualFill.style.left = `calc(${a} * (100% - 18px) / 100 + 9px)`;
+      dualFill.style.width = `calc(${Math.max(0, b - a)} * (100% - 18px) / 100)`;
+      // When both thumbs stack at the far right, the FROM thumb must sit on top
+      // so it can still be grabbed and dragged left; mirrored at the far left,
+      // where DOM order already puts the TO thumb on top.
+      timeFrom.style.zIndex = state.fromMonth > max / 2 ? 4 : 2;
+      timeTo.style.zIndex = 3;
+    }
+
+    // Year labels under the track (Januaries, thinned to at most ~8).
+    function buildRangeTicks() {
+      const el = document.getElementById('rangeTicks');
+      el.innerHTML = '';
+      const maxIdx = state.totalMonths - 1;
+      if (maxIdx < 1) return;
+      const marks = [];
+      for (let i = 0; i <= maxIdx; i++) {
+        if (new Date(addMonths(state.monthBase, i)).getMonth() === 0) marks.push(i);
+      }
+      const step = Math.max(1, Math.ceil(marks.length / 8));
+      for (let j = 0; j < marks.length; j += step) {
+        const i = marks[j];
+        const pct = (i / maxIdx) * 100;
+        const tick = document.createElement('span');
+        tick.className = 'range-tick';
+        tick.textContent = String(new Date(addMonths(state.monthBase, i)).getFullYear());
+        if (pct < 3) { tick.style.left = '0'; tick.style.transform = 'none'; }
+        else if (pct > 97) { tick.style.left = '100%'; tick.style.transform = 'translateX(-100%)'; }
+        else tick.style.left = pct + '%';
+        el.appendChild(tick);
+      }
+    }
 
     function updateTimeLabel() {
       const lbl = document.getElementById('timeRangeLabel');
-      if (state.fromMonth <= 0 && state.toMonth >= state.totalMonths - 1) { lbl.textContent = 'All time'; return; }
+      const full = state.fromMonth <= 0 && state.toMonth >= state.totalMonths - 1;
+      lbl.classList.toggle('narrowed', !full);
+      updateDualRange();
+      if (full) { lbl.textContent = 'All time'; lbl.title = ''; return; }
+      lbl.title = 'Reset to all time';
       const from = addMonths(state.monthBase, state.fromMonth);
       const to = addMonths(state.monthBase, state.toMonth);
       lbl.textContent = state.fromMonth === state.toMonth ? fmtMonShort(from) : fmtMonShort(from) + ' – ' + fmtMonShort(to);
     }
+
+    // Clicking the readout resets to the full range.
+    document.getElementById('timeRangeLabel').addEventListener('click', () => {
+      if (state.fromMonth <= 0 && state.toMonth >= state.totalMonths - 1) return;
+      state.fromMonth = 0; state.toMonth = state.totalMonths - 1;
+      timeFrom.value = 0; timeTo.value = state.toMonth;
+      updateTimeLabel(); applyFilters();
+    });
 
     // Debounce the heavy applyFilters() (grid rebuild) while dragging.
     // The label and histogram highlight update instantly to give live feedback.
