@@ -1375,6 +1375,40 @@ router.get('/albums', async (req, res) => {
   }
 });
 
+// GET /api/aurora/memories — "On this day": photos taken on today's day+month
+// in previous years, grouped by year (newest first). Dates are bucketed in UTC,
+// matching how the month events group. Full-library strftime scan is ~O(N) but
+// runs once per Albums visit and stays well under 100ms at 100k+ assets.
+router.get('/memories', async (req, res) => {
+  try {
+    const now = new Date();
+    const md = String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+    const rows = await db.all(
+      `SELECT a.id, a.path, a.kind, a.taken_at, a.width, a.height, a.duration_s,
+              a.gps_lat, a.gps_lon, a.fav, a.camera, a.live_video_id,
+              p.name AS place_name, p.country AS place_country,
+              CAST(strftime('%Y', datetime(a.taken_at/1000,'unixepoch')) AS INTEGER) AS y
+         FROM assets a LEFT JOIN places p ON a.place_id = p.id
+        WHERE a.taken_at IS NOT NULL
+          AND strftime('%m-%d', datetime(a.taken_at/1000,'unixepoch')) = ?
+          AND a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL
+        ORDER BY a.taken_at ASC`,
+      [md]
+    );
+    const thisYear = now.getFullYear();
+    const byYear = new Map();
+    for (const r of rows) {
+      if (r.y >= thisYear) continue;   // this year's photos aren't memories yet
+      if (!byYear.has(r.y)) byYear.set(r.y, []);
+      byYear.get(r.y).push(r);
+    }
+    const years = [...byYear.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([year, assets]) => ({ year, yearsAgo: thisYear - year, count: assets.length, assets: assets.slice(0, 50) }));
+    res.json({ day: now.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' }), years });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── User albums ──────────────────────────────────────────────────────────────
 // Viewing albums needs only a session (like the rest of the library); creating,
 // editing, and publishing share links needs albums.manage.
