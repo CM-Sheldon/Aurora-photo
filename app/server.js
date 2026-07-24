@@ -161,6 +161,13 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
     // resumes without waiting for the user to re-import.
     setTimeout(async () => {
       try {
+        // Users can disable the boot sweep in Settings → Maintenance
+        // (app_settings.warm_on_boot = '0'); default is on.
+        const pref = await auroraDb.get(`SELECT value FROM app_settings WHERE key = 'warm_on_boot'`);
+        if (pref && pref.value === '0') {
+          console.log('Aurora: boot thumbnail warming disabled in settings');
+          return;
+        }
         const n = await auroraDb.get('SELECT COUNT(*) c FROM assets');
         if (n && n.c > 0) {
           console.log(`Aurora: warming thumbnails for ${n.c} assets in background`);

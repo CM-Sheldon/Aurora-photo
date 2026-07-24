@@ -390,12 +390,13 @@ async function startImport(sourcePath, sessionId, opts = {}) {
 // is a sharp resize, each video an ffmpeg poster). This pre-generates the grid
 // thumbnails for the whole library in the background, bounded by thumbSem so it
 // never spikes memory. Resumable: already-cached thumbs are skipped instantly.
-const warmState = { running: false, done: 0, total: 0, generated: 0, phase: 'idle' };
+const warmState = { running: false, done: 0, total: 0, generated: 0, phase: 'idle', stopRequested: false };
 
 async function warmBatch(rows) {
   let i = 0;
   async function worker() {
     while (i < rows.length) {
+      if (warmState.stopRequested) return;
       const r = rows[i++];
       const out = getThumbPath(r.id, 'grid');
       if (!fs.existsSync(out)) {
@@ -418,6 +419,7 @@ async function startThumbnailWarming() {
   if (warmState.running) { warmState.rerun = true; return warmState; }
   warmState.running = true;
   warmState.rerun = false;
+  warmState.stopRequested = false;
   warmState.done = 0;
   warmState.generated = 0;
 
@@ -427,11 +429,12 @@ async function startThumbnailWarming() {
       warmState.total = totalRow ? totalRow.c : 0;
 
       // Photos first (fast, the bulk of the library), then videos (ffmpeg, slower)
-      for (const kind of ['photo', 'video']) {
+      sweep: for (const kind of ['photo', 'video']) {
         warmState.phase = kind === 'photo' ? 'photos' : 'videos';
         const PAGE = 500;
         let offset = 0;
         while (true) {
+          if (warmState.stopRequested) break sweep;
           const rows = await db.all(
             'SELECT id, path, kind FROM assets WHERE kind = ? ORDER BY taken_at DESC LIMIT ? OFFSET ?',
             [kind, PAGE, offset]
@@ -441,11 +444,12 @@ async function startThumbnailWarming() {
           offset += PAGE;
         }
       }
-      warmState.phase = 'complete';
+      warmState.phase = warmState.stopRequested ? 'stopped' : 'complete';
     } catch (_) {
       warmState.phase = 'error';
     } finally {
       warmState.running = false;
+      warmState.stopRequested = false;
       // Post-warm hook, retained as a seam for downstream tasks (e.g. auto-
       // starting a background job that reads cached thumbnails). No-op unless
       // server.js wires it up. Fires only on a clean completion.
@@ -453,8 +457,9 @@ async function startThumbnailWarming() {
         try { onWarmingComplete(); } catch (_) {}
       }
       // A re-run was requested while we were sweeping — go again so any
-      // photos imported mid-pass get their thumbnails.
-      if (warmState.rerun) {
+      // photos imported mid-pass get their thumbnails. An explicit stop wins
+      // over a queued re-run.
+      if (warmState.rerun && warmState.phase !== 'stopped') {
         warmState.rerun = false;
         setImmediate(() => startThumbnailWarming());
       }
@@ -465,6 +470,16 @@ async function startThumbnailWarming() {
 }
 
 function getWarmState() { return warmState; }
+
+// Ask a running warmer to stop. Workers check the flag between items, so the
+// sweep winds down within a few thumbnails; phase reports 'stopped'. Starting
+// again later resumes for free (already-cached thumbs are skipped instantly).
+function stopThumbnailWarming() {
+  if (!warmState.running) return warmState;
+  warmState.stopRequested = true;
+  warmState.rerun = false;
+  return warmState;
+}
 
 // ── Live Photo pairing ───────────────────────────────────────────────────────
 // An iPhone Live Photo is a still plus a short companion clip sharing the same
@@ -592,7 +607,7 @@ async function shutdown() {
 module.exports = {
   startImport, getSession, getThumbPath, ensureThumb,
   recoverInterruptedSessions, videoMimeType, shutdown,
-  startThumbnailWarming, getWarmState, linkLivePhotos,
+  startThumbnailWarming, stopThumbnailWarming, getWarmState, linkLivePhotos,
   isIndexing, setWarmingCompleteHook,
   // Exported for unit tests
   extractTakenAt, parseExifDate, dateFromFilename,
