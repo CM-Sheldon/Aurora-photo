@@ -1929,11 +1929,17 @@
               <div class="import-card-title">One-click actions</div>
               <div class="settings-actions">
                 <button class="btn" id="btnWarm" onclick="settingsWarm(this)">Warm thumbnails</button>
+                <button class="btn btn-ghost" id="btnWarmStop" style="display:none;" onclick="settingsWarmStop(this)">■ Stop warming</button>
                 <button class="btn btn-ghost" id="btnRelink" onclick="settingsRelink(this)">Re-link Live Photos</button>
                 <button class="btn btn-ghost" id="btnGeocode" onclick="settingsGeocode(this)">Name places on map</button>
               </div>
+              <div id="warmProgressLine" class="card-help" style="margin-top:10px;display:none;"></div>
+              <label class="card-help" style="display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer;">
+                <input type="checkbox" id="warmOnBootChk" checked onchange="settingsWarmBootPref(this)">
+                <span>Warm thumbnails automatically after each restart</span>
+              </label>
               <div class="card-help" style="margin-top:12px;">
-                <b>Warm thumbnails</b> pre-generates previews so browsing is instant.&nbsp;
+                <b>Warm thumbnails</b> pre-generates previews so browsing is instant; stopping is safe — it resumes where it left off next time.&nbsp;
                 <b>Re-link Live Photos</b> re-pairs stills with their motion clips.&nbsp;
                 <b>Name places on map</b> fills in place names from the offline cities dataset.
               </div>
@@ -2264,7 +2270,7 @@
       if (id === 'places') loadPlaces();
       if (id === 'search') loadSearch();
       if (id === 'albums') loadAlbums();
-      if (id === 'settings') loadSettings();
+      if (id === 'settings') { loadSettings(); startWarmPoll(); }
     }
     document.querySelectorAll('.nav-item, .bnav-item').forEach(item => {
       item.addEventListener('click', () => switchScreen(item.dataset.screen));
@@ -5413,9 +5419,68 @@
       setActionStatus('Starting thumbnail warming…');
       try {
         await fetch('/api/aurora/warm', { method: 'POST' });
-        setActionStatus('✓ Thumbnail warming started in the background — Refresh to watch progress.', 'ok');
+        setActionStatus('✓ Thumbnail warming started in the background.', 'ok');
         done('Started ✓');
+        startWarmPoll();
       } catch (e) { setActionStatus('Failed: ' + e.message, 'err'); done(); }
+    }
+
+    async function settingsWarmStop(btn) {
+      const done = btnBusy(btn, 'Stopping…');
+      try {
+        await fetch('/api/aurora/warm/stop', { method: 'POST' });
+        setActionStatus('Thumbnail warming is winding down…', 'ok');
+        done();
+        startWarmPoll();
+      } catch (e) { setActionStatus('Failed: ' + e.message, 'err'); done(); }
+    }
+
+    async function settingsWarmBootPref(chk) {
+      try {
+        const r = await fetch('/api/aurora/warm/config', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ warmOnBoot: chk.checked })
+        }).then(r => r.json());
+        if (r.error) { toast('Failed: ' + r.error); chk.checked = !chk.checked; return; }
+        toast(r.warmOnBoot ? 'Warming will auto-start after restarts' : 'Auto-warming after restart disabled');
+      } catch (_) { toast('Failed to save'); chk.checked = !chk.checked; }
+    }
+
+    // Poll warm status while the warmer runs so the Maintenance card shows live
+    // progress and the Stop button appears/disappears at the right times. The
+    // poller only runs while the Settings screen is visible and stops itself
+    // once the sweep is idle/complete.
+    let warmPollTimer = null;
+    async function refreshWarmStatus() {
+      try {
+        const w = await fetch('/api/aurora/warm/status').then(r => r.json());
+        const line = document.getElementById('warmProgressLine');
+        const stopBtn = document.getElementById('btnWarmStop');
+        const chk = document.getElementById('warmOnBootChk');
+        if (chk && typeof w.warmOnBoot === 'boolean') chk.checked = w.warmOnBoot;
+        if (w.running) {
+          stopBtn.style.display = '';
+          line.style.display = '';
+          const pct = w.total ? Math.round((w.done / w.total) * 100) : 0;
+          line.textContent = `Warming ${w.phase}: ${w.done.toLocaleString()} / ${w.total.toLocaleString()} scanned (${pct}%) · ${w.generated.toLocaleString()} generated this run`;
+          return true;
+        }
+        stopBtn.style.display = 'none';
+        if (w.phase === 'stopped') { line.style.display = ''; line.textContent = `Warming stopped — ${w.generated.toLocaleString()} generated this run. Start again any time; it resumes where it left off.`; }
+        else if (w.phase === 'complete') { line.style.display = ''; line.textContent = `Warming complete — ${w.generated.toLocaleString()} generated in the last run.`; }
+        else line.style.display = 'none';
+        return false;
+      } catch (_) { return false; }
+    }
+    function startWarmPoll() {
+      clearInterval(warmPollTimer);
+      warmPollTimer = setInterval(async () => {
+        const settingsVisible = document.getElementById('screen-settings').classList.contains('active');
+        if (!settingsVisible) { clearInterval(warmPollTimer); warmPollTimer = null; return; }
+        const running = await refreshWarmStatus();
+        if (!running) { clearInterval(warmPollTimer); warmPollTimer = null; }
+      }, 2500);
+      refreshWarmStatus();
     }
 
     async function settingsRelink(btn) {

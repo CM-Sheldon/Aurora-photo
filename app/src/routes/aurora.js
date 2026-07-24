@@ -7,7 +7,7 @@ const { execFile, spawn } = require('child_process');
 const os = require('os');
 const db = require('../services/auroraDbService');
 const { startImport, getSession, getThumbPath, ensureThumb, videoMimeType,
-        startThumbnailWarming, getWarmState, linkLivePhotos, THUMB_DIR } = require('../services/auroraIndexerService');
+        startThumbnailWarming, stopThumbnailWarming, getWarmState, linkLivePhotos, THUMB_DIR } = require('../services/auroraIndexerService');
 const { mountShare, unmountShare, isMounted, listActiveMounts, MOUNT_BASE } = require('../services/shareMountService');
 const geocoder = require('../services/auroraGeocoderService');
 const captioner = require('../services/auroraCaptionService');
@@ -1131,9 +1131,33 @@ router.post('/warm', requirePerm('settings.manage'), (req, res) => {
   res.json(state);
 });
 
-// GET /api/aurora/warm/status
-router.get('/warm/status', requirePerm('settings.view'), (req, res) => {
-  res.json(getWarmState());
+// POST /api/aurora/warm/stop — wind down a running warmer (resumable later)
+router.post('/warm/stop', requirePerm('settings.manage'), (req, res) => {
+  res.json(stopThumbnailWarming());
+});
+
+// GET /api/aurora/warm/status — includes the warm-on-boot preference
+router.get('/warm/status', requirePerm('settings.view'), async (req, res) => {
+  let warmOnBoot = true;
+  try {
+    const row = await db.get(`SELECT value FROM app_settings WHERE key = 'warm_on_boot'`);
+    warmOnBoot = !row || row.value !== '0';
+  } catch (_) {}
+  res.json({ ...getWarmState(), warmOnBoot });
+});
+
+// POST /api/aurora/warm/config  { warmOnBoot: true|false } — whether the boot
+// sweep auto-starts 8s after every service start (see server.js).
+router.post('/warm/config', requirePerm('settings.manage'), async (req, res) => {
+  try {
+    const enabled = !!req.body.warmOnBoot;
+    await db.run(
+      `INSERT INTO app_settings (key, value) VALUES ('warm_on_boot', ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [enabled ? '1' : '0']
+    );
+    res.json({ warmOnBoot: enabled });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ── Natural-language captions seam (for the networked vision-LLM worker) ──────
