@@ -1386,10 +1386,15 @@ router.get('/albums', async (req, res) => {
       `SELECT al.id, al.name, al.share_token, al.created_at, al.updated_at,
               (SELECT COUNT(*) FROM album_assets aa JOIN assets a ON a.id = aa.asset_id
                 WHERE aa.album_id = al.id AND a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL) AS count,
-              (SELECT aa.asset_id FROM album_assets aa JOIN assets a ON a.id = aa.asset_id
-                WHERE aa.album_id = al.id AND a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL
-                ORDER BY (aa.asset_id = al.cover_asset_id) DESC, aa.created_at DESC, aa.asset_id DESC
-                LIMIT 1) AS cover_id
+              COALESCE(
+                (SELECT a.id FROM album_assets aa JOIN assets a ON a.id = aa.asset_id
+                  WHERE aa.album_id = al.id AND a.id = al.cover_asset_id
+                    AND a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL),
+                (SELECT aa.asset_id FROM album_assets aa JOIN assets a ON a.id = aa.asset_id
+                  WHERE aa.album_id = al.id AND a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL
+                  ORDER BY aa.created_at DESC, aa.asset_id DESC
+                  LIMIT 1)
+              ) AS cover_id
        FROM albums al
        ORDER BY al.updated_at DESC, al.id DESC`
     );

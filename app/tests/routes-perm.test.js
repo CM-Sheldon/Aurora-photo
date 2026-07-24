@@ -37,6 +37,8 @@ const ALLOW_NO_PERM = new Set([
   "get:/tags/:tagId/photos",
   "post:/tags/for-assets",
   "get:/albums",
+  "get:/albums/:id/assets",
+  "get:/memories",
   // Caption worker (POST is auth-bypassed in the middleware allowlist).
   "post:/captions/ingest",
   "get:/captions/pending",
