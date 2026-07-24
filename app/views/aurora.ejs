@@ -701,6 +701,46 @@
     .event-month { font-family: var(--font-mono); font-size: 10px; color: var(--accent); letter-spacing: 1px; text-transform: uppercase; }
     .event-count { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
+    /* ── User albums ── */
+    .albums-empty { font-size: 13px; color: var(--text-muted); padding: 10px 2px 24px; }
+    .album-card-blank { background: linear-gradient(135deg, rgba(167,139,250,0.12), rgba(125,211,252,0.10)); }
+    .album-shared-dot { color: var(--accent-sky); font-size: 11px; }
+    .album-detail-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+    .album-detail-name { font-size: 19px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .album-detail-meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .album-detail-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .album-detail-actions .btn { font-size: 12px; }
+    .album-danger { color: #f87171; }
+    .album-share-row { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+    .album-share-row input {
+      flex: 1; min-width: 200px; background: var(--panel); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); color: var(--text); padding: 9px 12px;
+      font-family: var(--font-mono); font-size: 12px;
+    }
+    /* Flex-wrap, not css-grid — same iOS row-collapse bug as the Places
+       preview tiles (see .place-mini-grid). --acols sets the column count. */
+    .album-grid { display: flex; flex-wrap: wrap; gap: 4px; align-content: flex-start; --acols: 6; }
+    .album-tile {
+      position: relative; border-radius: 4px; overflow: hidden; cursor: pointer;
+      background: rgba(255,255,255,0.04);
+      flex: 0 0 calc((100% - (var(--acols) - 1) * 4px) / var(--acols));
+      max-width: calc((100% - (var(--acols) - 1) * 4px) / var(--acols));
+      padding-top: calc((100% - (var(--acols) - 1) * 4px) / var(--acols));
+    }
+    @media (max-width: 1100px) { .album-grid { --acols: 4; } }
+    @media (max-width: 760px)  { .album-grid { --acols: 3; } }
+    .album-tile img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+    .album-tile .album-tile-x, .album-tile .album-tile-cov {
+      position: absolute; top: 4px; z-index: 2; display: none;
+      width: 28px; height: 28px; border-radius: 50%; border: none; cursor: pointer;
+      background: rgba(0,0,0,0.65); color: #fff; font-size: 13px; line-height: 1;
+      align-items: center; justify-content: center;
+    }
+    .album-tile .album-tile-x { right: 4px; }
+    .album-tile .album-tile-cov { left: 4px; font-size: 12px; }
+    #albumDetail.editing .album-tile-x, #albumDetail.editing .album-tile-cov { display: flex; }
+    #albumDetail.editing .album-tile { cursor: default; }
+
     /* ── IMPORT SCREEN ── */
     .import-content { flex: 1; overflow-y: auto; padding: 24px; max-width: 700px; margin: 0 auto; width: 100%; }
     /* Settings screen */
@@ -1616,12 +1656,40 @@
       <div class="screen" id="screen-albums">
         <div class="topbar">
           <span class="topbar-title">Albums</span>
+          <div class="topbar-spacer"></div>
+          <button class="btn btn-ghost" data-perm="albums.manage" style="font-size:12px;" onclick="createAlbumPrompt()">＋ New album</button>
         </div>
-        <div class="albums-content">
+        <div class="albums-content" id="albumsHome">
+          <div class="albums-section-title">My Albums</div>
+          <div class="events-grid" id="myAlbumsGrid"></div>
+          <div class="albums-empty" id="myAlbumsEmpty" style="display:none;">No albums yet — select photos in the Library and tap “⊞ Album”, or create one here.</div>
           <div class="albums-section-title">Smart Albums</div>
           <div class="smart-albums" id="smartAlbums"></div>
           <div class="albums-section-title">Memories by Month</div>
           <div class="events-grid" id="eventsGrid"></div>
+        </div>
+        <!-- Album detail (swaps with albumsHome) -->
+        <div class="albums-content" id="albumDetail" style="display:none;">
+          <div class="album-detail-head">
+            <button class="btn btn-ghost" style="flex-shrink:0;" onclick="closeAlbumDetail()">←</button>
+            <div style="flex:1;min-width:0;">
+              <div class="album-detail-name" id="albumDetailName">—</div>
+              <div class="album-detail-meta" id="albumDetailMeta">—</div>
+            </div>
+            <div class="album-detail-actions" data-perm="albums.manage">
+              <button class="btn btn-ghost" id="albumEditBtn" onclick="toggleAlbumEdit()">Edit</button>
+              <button class="btn btn-ghost" onclick="toggleAlbumShare()">⤴ Share link</button>
+              <button class="btn btn-ghost" onclick="renameAlbum()">Rename</button>
+              <button class="btn btn-ghost album-danger" onclick="deleteAlbum()">Delete</button>
+            </div>
+          </div>
+          <div class="album-share-row" id="albumShareRow" style="display:none;">
+            <input id="albumShareUrl" readonly onclick="this.select()">
+            <button class="btn" style="flex-shrink:0;" onclick="copyAlbumShare()">Copy link</button>
+            <button class="btn btn-ghost" style="flex-shrink:0;" onclick="revokeAlbumShare()">Stop sharing</button>
+          </div>
+          <div class="album-grid" id="albumGrid"></div>
+          <div class="albums-empty" id="albumEmpty" style="display:none;">This album is empty — select photos in the Library and tap “⊞ Album”.</div>
         </div>
       </div>
 
@@ -2087,6 +2155,7 @@
       <button class="sel-btn" onclick="selSelectAll()">Select all</button>
       <button class="sel-btn sel-primary" data-perm="photos.tag" onclick="selStartAddTag()">＋ Add tag</button>
       <button class="sel-btn" data-perm="photos.tag" onclick="selStartRemoveTag()">－ Remove tag</button>
+      <button class="sel-btn" data-perm="albums.manage" onclick="selStartAddToAlbum()">⊞ Album</button>
       <button class="sel-btn" id="selPrivateBtn" data-perm="photos.hidden" onclick="selHidePhotos()">🔒 Hide</button>
       <button class="sel-btn" id="selShareBtn" data-perm="photos.download" onclick="shareSelection()">⤴ Share</button>
       <button class="sel-btn" onclick="exitSelectMode()">Done</button>
@@ -4312,6 +4381,31 @@
       try {
         const data = await fetch('/api/aurora/albums').then(r => r.json());
 
+        // My Albums (user-created)
+        const mine = document.getElementById('myAlbumsGrid');
+        const mineEmpty = document.getElementById('myAlbumsEmpty');
+        mine.innerHTML = '';
+        const userAlbums = data.user || [];
+        mineEmpty.style.display = userAlbums.length ? 'none' : 'block';
+        for (const al of userAlbums) {
+          const el = document.createElement('div');
+          el.className = 'event-card' + (al.cover_id ? '' : ' album-card-blank');
+          if (al.cover_id) {
+            const img = document.createElement('img');
+            img.loading = 'lazy'; img.decoding = 'async';
+            img.src = thumbUrl(al.cover_id, 'grid');
+            el.appendChild(img);
+          }
+          const overlay = document.createElement('div');
+          overlay.className = 'event-card-overlay';
+          overlay.innerHTML = `
+            <div class="event-month">${escapeHtml(al.name)}${al.share_token ? ' <span class="album-shared-dot" title="Has a public share link">⤴</span>' : ''}</div>
+            <div class="event-count">${al.count.toLocaleString()} items</div>`;
+          el.appendChild(overlay);
+          el.addEventListener('click', () => openAlbumDetail(al.id));
+          mine.appendChild(el);
+        }
+
         // Smart albums
         const icons = { favorites: '♥', videos: '▶', recent: '◷', hidden: '🔒' };
         const iconClass = { favorites: '', videos: 'sky', recent: 'orchid', hidden: '' };
@@ -4363,6 +4457,253 @@
           eventsEl.appendChild(el);
         }
       } catch(_) {}
+    }
+
+    // ── User album detail ──
+    let currentAlbum = null;   // album row while the detail view is open
+    let albumAssets = [];
+
+    async function createAlbumPrompt() {
+      const name = prompt('Album name');
+      if (!name || !name.trim()) return;
+      try {
+        const r = await fetch('/api/aurora/albums', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name.trim() })
+        }).then(r => r.json());
+        if (r.error) { toast('Failed: ' + r.error); return; }
+        toast(`Album “${r.name}” created`);
+        loadAlbums();
+      } catch (_) { toast('Failed to create album'); }
+    }
+
+    async function openAlbumDetail(id) {
+      try {
+        const data = await fetch(`/api/aurora/albums/${id}/assets`).then(r => r.json());
+        if (data.error) { toast(data.error); return; }
+        currentAlbum = data.album;
+        document.getElementById('albumsHome').style.display = 'none';
+        const detail = document.getElementById('albumDetail');
+        detail.style.display = 'block';
+        detail.classList.remove('editing');
+        document.getElementById('albumEditBtn').textContent = 'Edit';
+        renderAlbumDetail(data.assets);
+      } catch (_) { toast('Failed to open album'); }
+    }
+
+    function closeAlbumDetail() {
+      currentAlbum = null; albumAssets = [];
+      document.getElementById('albumDetail').style.display = 'none';
+      document.getElementById('albumsHome').style.display = 'block';
+      loadAlbums();   // refresh covers/counts after any edits
+    }
+
+    function renderAlbumDetail(assets) {
+      albumAssets = assets;
+      document.getElementById('albumDetailName').textContent = currentAlbum.name;
+      const dated = assets.filter(a => a.taken_at);
+      const span = dated.length
+        ? `  ·  ${fmtDate(dated[0].taken_at)} – ${fmtDate(dated[dated.length - 1].taken_at)}` : '';
+      document.getElementById('albumDetailMeta').textContent =
+        `${assets.length.toLocaleString()} ${assets.length === 1 ? 'item' : 'items'}${span}`;
+      updateAlbumShareRow();
+
+      const grid = document.getElementById('albumGrid');
+      grid.innerHTML = '';
+      document.getElementById('albumEmpty').style.display = assets.length ? 'none' : 'block';
+      const canManage = havePerm('albums.manage');
+      assets.forEach((a, idx) => {
+        const t = document.createElement('div');
+        t.className = 'album-tile';
+        const img = document.createElement('img');
+        img.loading = 'lazy'; img.decoding = 'async'; img.alt = '';
+        img.src = thumbUrl(a.id);
+        t.appendChild(img);
+        if (a.kind === 'video') {
+          const b = document.createElement('div'); b.className = 'tile-video-badge';
+          b.textContent = a.duration_s ? '▶ ' + fmtDuration(a.duration_s) : '▶'; t.appendChild(b);
+        } else if (a.live_video_id) {
+          const b = document.createElement('div'); b.className = 'tile-live-badge'; b.textContent = 'LIVE'; t.appendChild(b);
+        }
+        if (canManage) {
+          const x = document.createElement('button');
+          x.className = 'album-tile-x'; x.textContent = '✕'; x.title = 'Remove from album';
+          x.addEventListener('click', (e) => { e.stopPropagation(); removeFromAlbum(a.id); });
+          t.appendChild(x);
+          const cov = document.createElement('button');
+          cov.className = 'album-tile-cov'; cov.textContent = '★'; cov.title = 'Use as album cover';
+          cov.addEventListener('click', (e) => { e.stopPropagation(); setAlbumCover(a.id); });
+          t.appendChild(cov);
+        }
+        t.addEventListener('click', () => {
+          if (document.getElementById('albumDetail').classList.contains('editing')) return;
+          state.lightboxItems = albumAssets;
+          openLightbox(idx);
+        });
+        grid.appendChild(t);
+      });
+    }
+
+    function toggleAlbumEdit() {
+      const detail = document.getElementById('albumDetail');
+      const on = detail.classList.toggle('editing');
+      document.getElementById('albumEditBtn').textContent = on ? 'Done' : 'Edit';
+    }
+
+    async function removeFromAlbum(assetId) {
+      if (!currentAlbum) return;
+      try {
+        const r = await fetch(`/api/aurora/albums/${currentAlbum.id}/assets`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ remove: [assetId] })
+        }).then(r => r.json());
+        if (r.error) { toast('Failed: ' + r.error); return; }
+        renderAlbumDetail(albumAssets.filter(a => a.id !== assetId));
+      } catch (_) { toast('Failed to remove'); }
+    }
+
+    async function setAlbumCover(assetId) {
+      if (!currentAlbum) return;
+      try {
+        const r = await fetch(`/api/aurora/albums/${currentAlbum.id}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ coverAssetId: assetId })
+        }).then(r => r.json());
+        if (r.error) { toast('Failed: ' + r.error); return; }
+        toast('Cover updated');
+      } catch (_) { toast('Failed to set cover'); }
+    }
+
+    async function renameAlbum() {
+      if (!currentAlbum) return;
+      const name = prompt('Album name', currentAlbum.name);
+      if (!name || !name.trim() || name.trim() === currentAlbum.name) return;
+      try {
+        const r = await fetch(`/api/aurora/albums/${currentAlbum.id}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name.trim() })
+        }).then(r => r.json());
+        if (r.error) { toast('Failed: ' + r.error); return; }
+        currentAlbum.name = r.name;
+        document.getElementById('albumDetailName').textContent = r.name;
+      } catch (_) { toast('Failed to rename'); }
+    }
+
+    async function deleteAlbum() {
+      if (!currentAlbum) return;
+      if (!confirm(`Delete album “${currentAlbum.name}”? The photos themselves are not touched.`)) return;
+      try {
+        const r = await fetch(`/api/aurora/albums/${currentAlbum.id}/delete`, { method: 'POST' }).then(r => r.json());
+        if (r.error) { toast('Failed: ' + r.error); return; }
+        toast('Album deleted');
+        closeAlbumDetail();
+      } catch (_) { toast('Failed to delete'); }
+    }
+
+    // ── Album share link ──
+    function updateAlbumShareRow() {
+      const row = document.getElementById('albumShareRow');
+      if (currentAlbum && currentAlbum.share_token) {
+        row.style.display = 'flex';
+        document.getElementById('albumShareUrl').value =
+          location.origin + '/share/' + currentAlbum.share_token;
+      } else {
+        row.style.display = 'none';
+      }
+    }
+
+    async function toggleAlbumShare() {
+      if (!currentAlbum) return;
+      if (currentAlbum.share_token) { updateAlbumShareRow(); return; }
+      try {
+        const r = await fetch(`/api/aurora/albums/${currentAlbum.id}/share`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enable: true })
+        }).then(r => r.json());
+        if (r.error) { toast('Failed: ' + r.error); return; }
+        currentAlbum.share_token = r.token;
+        updateAlbumShareRow();
+        toast('Share link created — anyone with the link can view this album');
+      } catch (_) { toast('Failed to create share link'); }
+    }
+
+    async function revokeAlbumShare() {
+      if (!currentAlbum || !currentAlbum.share_token) return;
+      try {
+        const r = await fetch(`/api/aurora/albums/${currentAlbum.id}/share`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enable: false })
+        }).then(r => r.json());
+        if (r.error) { toast('Failed: ' + r.error); return; }
+        currentAlbum.share_token = null;
+        updateAlbumShareRow();
+        toast('Share link disabled');
+      } catch (_) { toast('Failed to disable link'); }
+    }
+
+    function copyAlbumShare() {
+      const input = document.getElementById('albumShareUrl');
+      // Aurora is usually plain HTTP on a LAN, where navigator.clipboard is
+      // absent — fall back to the old select+execCommand path.
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(input.value).then(() => toast('Link copied'), () => legacyCopy(input));
+      } else legacyCopy(input);
+    }
+    function legacyCopy(input) {
+      input.focus(); input.select();
+      try { document.execCommand('copy'); toast('Link copied'); }
+      catch (_) { toast('Copy failed — long-press the link to copy it'); }
+    }
+
+    // ── Selection bar → add to album ──
+    async function selStartAddToAlbum() {
+      if (!state.selected.size) { toast('Select some photos first'); return; }
+      cancelSelEntry();
+      const menu = document.getElementById('selTagMenu');
+      menu.style.display = 'flex';
+      menu.innerHTML = '<span style="font-size:12px;color:var(--text-muted)">Loading…</span>';
+      try {
+        const data = await fetch('/api/aurora/albums').then(r => r.json());
+        menu.innerHTML = '<span style="font-size:11px;color:var(--text-muted);width:100%;text-align:center;">Add selection to album</span>';
+        for (const al of (data.user || [])) {
+          const chip = document.createElement('span');
+          chip.className = 'chip';
+          chip.innerHTML = escapeHtml(al.name) + `<span class="chip-count">${al.count}</span>`;
+          chip.addEventListener('click', () => selAddToAlbum(al.id, al.name));
+          menu.appendChild(chip);
+        }
+        const newChip = document.createElement('span');
+        newChip.className = 'chip';
+        newChip.textContent = '＋ New album…';
+        newChip.addEventListener('click', async () => {
+          const name = prompt('New album name');
+          if (!name || !name.trim()) return;
+          try {
+            const r = await fetch('/api/aurora/albums', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: name.trim() })
+            }).then(r => r.json());
+            if (r.error) { toast('Failed: ' + r.error); return; }
+            selAddToAlbum(r.id, r.name);
+          } catch (_) { toast('Failed to create album'); }
+        });
+        menu.appendChild(newChip);
+      } catch (_) { menu.innerHTML = '<span style="font-size:12px;color:#f87171">Failed to load albums</span>'; }
+    }
+
+    async function selAddToAlbum(albumId, albumName) {
+      const ids = [...state.selected];
+      document.getElementById('selTagMenu').style.display = 'none';
+      if (!ids.length) return;
+      try {
+        const r = await fetch(`/api/aurora/albums/${albumId}/assets`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ add: ids })
+        }).then(r => r.json());
+        if (r.error) { toast('Failed: ' + r.error); return; }
+        const skipped = ids.length - (r.added || 0);
+        toast(`Added ${(r.added || 0).toLocaleString()} to “${albumName}”` + (skipped ? ` (${skipped} already there)` : ''));
+      } catch (_) { toast('Failed to add to album'); }
     }
 
     // Open a date range in the Library by driving the existing time-range sliders.
