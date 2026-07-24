@@ -14,6 +14,7 @@ const compression = require('compression');
 
 const auroraRoutes = require('./src/routes/aurora');
 const authRoutes = require('./src/routes/authRoutes');
+const shareRoutes = require('./src/routes/shareRoutes');
 const auroraDb = require('./src/services/auroraDbService');
 const auroraIndexer = require('./src/services/auroraIndexerService');
 const auroraAuth = require('./src/services/auroraAuthService');
@@ -85,6 +86,10 @@ app.get('/api/aurora/version', (req, res) => res.json(APP_VERSION));
 // without a session.
 app.use('/api/aurora/auth', authRoutes);
 
+// Public album shares — token-keyed, no session. Mounted before the guard so
+// share links work for people without an Aurora account (see shareRoutes.js).
+app.use('/api/aurora/share', shareRoutes);
+
 // Everything else under /api/aurora/* needs an authenticated session; individual
 // endpoints add requirePerm() for finer-grained checks.
 app.use('/api/aurora', requireAuth, auroraRoutes);
@@ -114,6 +119,14 @@ app.get('/aurora', async (req, res) => {
   } catch (_) {}
   res.render('aurora', { user: req.user, appVersion: APP_VERSION, cacheEpoch });
 });
+// Public share page. Rendered unconditionally — the page fetches the album
+// client-side and shows a clean "no longer available" state for dead tokens.
+app.get('/share/:token', (req, res) => {
+  const token = String(req.params.token || '');
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(token)) return res.status(404).json({ error: 'Not found' });
+  res.render('share', { token });
+});
+
 app.get('/', (req, res) => res.redirect('/aurora'));
 
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));

@@ -21,6 +21,7 @@ const PERMISSIONS = [
   { key: 'photos.download',  group: 'Photos',   label: 'Download originals + zip shares' },
   { key: 'photos.hidden',    group: 'Photos',   label: 'See and manage the hidden album' },
   { key: 'photos.delete',    group: 'Photos',   label: 'Delete / resolve duplicates' },
+  { key: 'albums.manage',    group: 'Photos',   label: 'Create / edit albums + share links' },
   { key: 'settings.view',    group: 'Settings', label: 'View settings / metrics' },
   { key: 'settings.manage',  group: 'Settings', label: 'Change settings (imports, mounts, warming, updates)' },
   { key: 'users.manage',     group: 'Admin',    label: 'Manage users' },

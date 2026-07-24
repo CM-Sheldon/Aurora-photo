@@ -1354,10 +1354,147 @@ router.get('/albums', async (req, res) => {
       { id: 'recent', name: 'Recent 30 days', icon: 'clock', count: recent.count, query: { from: Date.now() - 30 * 24 * 3600 * 1000 } },
     ];
     if (canSeeHidden) smart.push({ id: 'hidden', name: 'Hidden', icon: 'lock', count: hidden.count, query: { showHidden: '1' } });
-    res.json({ smart, events });
+
+    // User albums. Count only visible members; the cover prefers the chosen
+    // cover_asset_id but falls back to the newest visible member, so a cover
+    // that was later hidden/deduped never leaks a thumbnail.
+    const user = await db.all(
+      `SELECT al.id, al.name, al.share_token, al.created_at, al.updated_at,
+              (SELECT COUNT(*) FROM album_assets aa JOIN assets a ON a.id = aa.asset_id
+                WHERE aa.album_id = al.id AND a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL) AS count,
+              (SELECT aa.asset_id FROM album_assets aa JOIN assets a ON a.id = aa.asset_id
+                WHERE aa.album_id = al.id AND a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL
+                ORDER BY (aa.asset_id = al.cover_asset_id) DESC, aa.created_at DESC, aa.asset_id DESC
+                LIMIT 1) AS cover_id
+       FROM albums al
+       ORDER BY al.updated_at DESC, al.id DESC`
+    );
+    res.json({ smart, events, user });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── User albums ──────────────────────────────────────────────────────────────
+// Viewing albums needs only a session (like the rest of the library); creating,
+// editing, and publishing share links needs albums.manage.
+const ALBUM_VISIBLE = 'a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL';
+
+async function getAlbum(id) {
+  return db.get('SELECT id, name, cover_asset_id, share_token, created_at, updated_at FROM albums WHERE id = ?', [id]);
+}
+
+// POST /api/aurora/albums  { name } → create
+router.post('/albums', requirePerm('albums.manage'), async (req, res) => {
+  try {
+    const name = String(req.body.name || '').trim().slice(0, 120);
+    if (!name) return res.status(400).json({ error: 'Album name required' });
+    const now = Date.now();
+    const r = await db.run(
+      'INSERT INTO albums (name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?)',
+      [name, req.user ? req.user.id : null, now, now]
+    );
+    res.json({ id: r.lastID, name });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/aurora/albums/:id  { name?, coverAssetId? } — rename / set cover
+router.post('/albums/:id', requirePerm('albums.manage'), async (req, res) => {
+  try {
+    const album = await getAlbum(req.params.id);
+    if (!album) return res.status(404).json({ error: 'Album not found' });
+    if (req.body.name !== undefined) {
+      const name = String(req.body.name || '').trim().slice(0, 120);
+      if (!name) return res.status(400).json({ error: 'Album name required' });
+      await db.run('UPDATE albums SET name = ?, updated_at = ? WHERE id = ?', [name, Date.now(), album.id]);
+    }
+    if (req.body.coverAssetId !== undefined) {
+      const cover = parseInt(req.body.coverAssetId, 10) || null;
+      if (cover) {
+        const member = await db.get('SELECT 1 AS ok FROM album_assets WHERE album_id = ? AND asset_id = ?', [album.id, cover]);
+        if (!member) return res.status(400).json({ error: 'Cover must be a photo in the album' });
+      }
+      await db.run('UPDATE albums SET cover_asset_id = ?, updated_at = ? WHERE id = ?', [cover, Date.now(), album.id]);
+    }
+    res.json(await getAlbum(album.id));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/aurora/albums/:id/delete — removes the album (never the photos)
+router.post('/albums/:id/delete', requirePerm('albums.manage'), async (req, res) => {
+  try {
+    const album = await getAlbum(req.params.id);
+    if (!album) return res.status(404).json({ error: 'Album not found' });
+    await db.run('DELETE FROM album_assets WHERE album_id = ?', [album.id]);
+    await db.run('DELETE FROM albums WHERE id = ?', [album.id]);
+    res.json({ deleted: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/aurora/albums/:id/assets  { add: [ids] } and/or { remove: [ids] }
+router.post('/albums/:id/assets', requirePerm('albums.manage'), async (req, res) => {
+  try {
+    const album = await getAlbum(req.params.id);
+    if (!album) return res.status(404).json({ error: 'Album not found' });
+    const toIds = (v) => (Array.isArray(v) ? v.map(n => parseInt(n, 10)).filter(Number.isFinite) : []);
+    const add = toIds(req.body.add), remove = toIds(req.body.remove);
+    const now = Date.now();
+    let added = 0;
+    for (const id of add) {
+      const r = await db.run('INSERT OR IGNORE INTO album_assets (album_id, asset_id, created_at) VALUES (?, ?, ?)', [album.id, id, now]);
+      added += r.changes || 0;
+    }
+    for (const id of remove) {
+      await db.run('DELETE FROM album_assets WHERE album_id = ? AND asset_id = ?', [album.id, id]);
+    }
+    await db.run('UPDATE albums SET updated_at = ? WHERE id = ?', [now, album.id]);
+    const count = (await db.get(
+      `SELECT COUNT(*) AS c FROM album_assets aa JOIN assets a ON a.id = aa.asset_id
+        WHERE aa.album_id = ? AND ${ALBUM_VISIBLE}`, [album.id])).c;
+    res.json({ added, removed: remove.length, count });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/aurora/albums/:id/assets — album detail + its visible photos, oldest
+// first (an album reads like a story). Same field shape as /assets so the
+// existing tile builder + lightbox work unchanged.
+router.get('/albums/:id/assets', async (req, res) => {
+  try {
+    const album = await getAlbum(req.params.id);
+    if (!album) return res.status(404).json({ error: 'Album not found' });
+    const assets = await db.all(
+      `SELECT a.id, a.path, a.kind, a.taken_at, a.width, a.height, a.duration_s,
+              a.gps_lat, a.gps_lon, a.fav, a.camera, a.live_video_id,
+              p.name AS place_name, p.country AS place_country
+       FROM album_assets aa
+       JOIN assets a ON a.id = aa.asset_id
+       LEFT JOIN places p ON a.place_id = p.id
+       WHERE aa.album_id = ? AND ${ALBUM_VISIBLE}
+       ORDER BY CASE WHEN a.taken_at IS NULL THEN 1 ELSE 0 END, a.taken_at ASC, a.id ASC`,
+      [album.id]
+    );
+    res.json({ album, assets });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/aurora/albums/:id/share  { enable: true|false }
+// enable → mint (or return the existing) token; disable → revoke it.
+router.post('/albums/:id/share', requirePerm('albums.manage'), async (req, res) => {
+  try {
+    const album = await getAlbum(req.params.id);
+    if (!album) return res.status(404).json({ error: 'Album not found' });
+    if (req.body.enable) {
+      let token = album.share_token;
+      if (!token) {
+        token = crypto.randomBytes(16).toString('base64url');
+        await db.run('UPDATE albums SET share_token = ?, updated_at = ? WHERE id = ?', [token, Date.now(), album.id]);
+      }
+      res.json({ shared: true, token, path: `/share/${token}` });
+    } else {
+      await db.run('UPDATE albums SET share_token = NULL, updated_at = ? WHERE id = ?', [Date.now(), album.id]);
+      res.json({ shared: false });
+    }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ── Software update ──────────────────────────────────────────────────────────

@@ -168,6 +168,28 @@ function initSchema() {
 
       d.run(`CREATE VIRTUAL TABLE IF NOT EXISTS assets_fts USING fts5(text, content='')`);
 
+      // ── User albums (manual collections, many-to-many with assets) ──────
+      // share_token non-NULL = the album is published at /share/<token> with no
+      // auth. cover_asset_id is a hint only — the API always falls back to the
+      // newest visible member if the chosen cover is hidden/removed later.
+      d.run(`CREATE TABLE IF NOT EXISTS albums (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        cover_asset_id INTEGER,
+        share_token TEXT,
+        created_by INTEGER,
+        created_at INTEGER,
+        updated_at INTEGER
+      )`);
+      d.run(`CREATE TABLE IF NOT EXISTS album_assets (
+        album_id INTEGER NOT NULL,
+        asset_id INTEGER NOT NULL,
+        created_at INTEGER,
+        PRIMARY KEY (album_id, asset_id)
+      )`);
+      d.run(`CREATE INDEX IF NOT EXISTS idx_album_assets_asset ON album_assets(asset_id)`);
+      d.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_albums_token ON albums(share_token) WHERE share_token IS NOT NULL`);
+
       // ── RBAC: users, roles, sessions, audit log ─────────────────────────
       // Auth is bolted on top of an existing single-tenant DB, so all four
       // tables are created idempotently and never touch the photo schema. A
