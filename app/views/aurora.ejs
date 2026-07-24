@@ -566,15 +566,20 @@
     .place-detail-name { font-size: 15px; font-weight: 600; }
     .place-detail-meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-top: 4px; }
     .place-detail-preview-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-faint); padding: 12px 12px 0; }
-    .place-mini-grid { padding: 12px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; flex: 1; overflow-y: auto; align-content: start; min-width: 0; }
+    /* Flex-wrap, NOT css-grid: iOS Safari sizes grid row tracks as zero-height
+       when the item's height comes from percentage padding, so the preview
+       tiles painted on top of each other on mobile (each showing a sliver).
+       As flex items the % padding resolves against the container width —
+       the square-tile hack works reliably everywhere. */
+    .place-mini-grid {
+      padding: 12px; display: flex; flex-wrap: wrap; gap: 3px;
+      flex: 1; overflow-y: auto; align-content: flex-start; min-width: 0;
+    }
     .place-mini-tile {
       position: relative;
-      /* Square tile keyed off the row's inline size. aspect-ratio alone was
-         inconsistent on iOS Safari inside grid tracks — the tile would
-         sometimes render at natural image height and overlap its neighbour.
-         padding-top: 100% is universally supported and forces a square. */
-      width: 100%;
-      padding-top: 100%;
+      flex: 0 0 calc((100% - 6px) / 3);
+      max-width: calc((100% - 6px) / 3);
+      padding-top: calc((100% - 6px) / 3);  /* height = tile width → square */
       border-radius: 4px; overflow: hidden;
       background: rgba(255,255,255,0.04); cursor: pointer;
     }
