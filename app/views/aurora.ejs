@@ -12,6 +12,16 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Aurora">
   <link rel="apple-touch-icon" href="/aurora-icon-180.png">
+  <!-- Apply the saved theme before first paint so there's no flash of the
+       default before /me returns the account's real preference. -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('aurora.theme');
+        if (t === 'light' || t === 'dark' || t === 'purple') document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -242,6 +252,30 @@
       padding: 14px 20px; border-bottom: 1px solid var(--border);
       background: rgba(6,6,12,0.3); flex-shrink: 0;
     }
+
+    /* Auto-hiding chrome: the toolbar + time-range are an absolute OVERLAY that
+       slides up on scroll-down and back on scroll-up. Because it's out of flow,
+       toggling it never resizes the gallery — the photos stay exactly where they
+       were (no reflow / lost place). The gallery reserves --lib-inset of top space
+       (set in JS to the overlay's height, incl. the safe-area) so its first row
+       sits just below the bar and content scrolls cleanly under it. */
+    #screen-library { position: relative; }
+    .lib-chrome {
+      position: absolute; top: 0; left: 0; right: 0; z-index: 15;
+      transition: transform .28s ease;
+    }
+    #screen-library.chrome-min .lib-chrome { transform: translateY(-100%); }
+    #screen-library .photo-grid-wrap { padding-top: var(--lib-inset, 0px); }
+    .chrome-peek {
+      position: absolute; top: env(safe-area-inset-top); left: 50%; z-index: 20; cursor: pointer;
+      transform: translateX(-50%) translateY(-110%);
+      background: var(--panel); border: 1px solid var(--border); border-top: none;
+      border-radius: 0 0 12px 12px; padding: 3px 22px; font-size: 15px; line-height: 1.1;
+      color: var(--text-muted); opacity: 0; pointer-events: none;
+      transition: transform .28s ease, opacity .2s ease; backdrop-filter: blur(10px);
+    }
+    #screen-library.chrome-min .chrome-peek { transform: translateX(-50%) translateY(0); opacity: 1; pointer-events: auto; }
+    .chrome-peek:hover { color: var(--text); background: var(--panel-hover); }
     .slider-row { display: flex; align-items: center; gap: 16px; margin-bottom: 10px; }
     .slider-label { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); min-width: 80px; }
     .slider-value { font-family: var(--font-mono); font-size: 11px; color: var(--accent); min-width: 100px; text-align: right; }
@@ -338,12 +372,18 @@
     #photoGrid .mb-label { font-family: var(--font-mono); font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: 0.3px; }
     #photoGrid .mb-count { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); padding-bottom: 2px; }
     .floating-month {
-      position: sticky; top: 0; z-index: 5; align-self: flex-start;
+      /* Pinned overlay near the top of the screen (absolute in #screen-library),
+         so it never scrolls or gets pushed down by the grid's top inset. It sits
+         BELOW the peek handle (which hugs the top edge at env(safe-area-inset-top),
+         ~24px tall) so the two never overlap when both show while scroll-collapsed,
+         and behind the toolbar (lower z-index) while the toolbar is shown. */
+      position: absolute; left: 50%; transform: translateX(-50%);
+      top: calc(env(safe-area-inset-top) + 34px); z-index: 8;
       display: inline-block; pointer-events: none;
       font-family: var(--font-mono); font-size: 11px; letter-spacing: 1px;
       text-transform: uppercase; color: var(--text);
       background: rgba(6,6,12,0.82); border: 1px solid var(--border);
-      border-radius: 20px; padding: 5px 14px; margin-bottom: 8px;
+      border-radius: 20px; padding: 5px 14px;
       backdrop-filter: blur(10px); opacity: 0; transition: opacity 0.2s;
     }
     .floating-month.show { opacity: 1; }
@@ -1048,6 +1088,9 @@
     .toast {
       position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
       background: rgba(30,30,40,0.95); border: 1px solid var(--border);
+      /* Dark snackbar in every theme → pin light text so it stays readable when
+         the page text colour flips dark for the light theme. */
+      color: rgba(255,255,255,0.95);
       border-radius: var(--radius-sm); padding: 10px 20px;
       font-size: 13px; z-index: 200; opacity: 0; transition: opacity 0.2s;
       pointer-events: none; backdrop-filter: blur(10px);
@@ -1082,8 +1125,12 @@
       .bnav-icon { font-size: 19px; }
 
       /* Give content room above the tab bar */
+      /* The screen already reserves clearance for the fixed bottom-nav, so the
+         grid's own bottom padding only needs to be a small margin — not another
+         full nav-height, which stacked into a big band of dead space under the
+         last row of photos. */
       .screen { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
-      .photo-grid-wrap { padding: 10px 10px calc(60px + env(safe-area-inset-bottom)); }
+      .photo-grid-wrap { padding: 10px 10px 14px; }
 
       /* Topbar: tighten, allow tab group to wrap/scroll */
       .topbar { padding: 12px 14px; padding-top: max(12px, env(safe-area-inset-top)); flex-wrap: wrap; }
@@ -1219,6 +1266,12 @@
     .rbac-dialog .err.show { display:block; }
     .rbac-dialog .rbac-hint { margin-top:10px; font-size:12px; color:var(--text-muted); line-height:1.45; }
 
+    /* ── Audit filter chips ── */
+    .audit-filter-bar { display:flex; gap:6px; flex-wrap:wrap; margin:12px 0; }
+    .audit-chip { padding:5px 12px; border-radius:16px; border:1px solid var(--border); background:var(--panel); color:var(--text-muted); font-family:inherit; font-size:12px; cursor:pointer; transition:all 0.15s; }
+    .audit-chip:hover { color:var(--text); border-color:var(--border-strong); }
+    .audit-chip.active { background:rgba(167,139,250,0.15); border-color:var(--accent); color:var(--text); }
+
     /* ── Topbar user chip ── */
     .user-chip { display:flex; align-items:center; gap:6px; padding:6px 10px; border-radius:20px; background:var(--panel); border:1px solid var(--border); font-size:12px; color:var(--text); cursor:pointer; font-family:inherit; }
     .user-chip:hover { background:var(--panel-hover); }
@@ -1228,6 +1281,22 @@
     .user-menu .row:hover { background:var(--panel-hover); }
     .user-menu .row.head { color:var(--text-muted); cursor:default; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; padding-top:4px; padding-bottom:6px; }
     .user-menu .row.head:hover { background:none; }
+    .user-menu .row.sub-head { color:var(--text-faint); cursor:default; font-size:10px; text-transform:uppercase; letter-spacing:0.6px; padding:6px 12px 2px; }
+    .user-menu .row.sub-head:hover { background:none; }
+    .user-menu .row.sep { border-top:1px solid var(--border); margin-top:4px; padding-top:10px; }
+    .user-menu .row.theme-row { display:flex; align-items:center; gap:8px; }
+    .user-menu .row.theme-row.active { color:var(--accent); }
+    .user-menu .row.theme-row.active::after { content:'✓'; margin-left:auto; }
+    .theme-swatch { width:14px; height:14px; border-radius:50%; border:1px solid var(--border-strong); flex-shrink:0; }
+    .theme-swatch-purple { background:linear-gradient(135deg,#a78bfa,#7dd3fc); }
+    .theme-swatch-dark { background:#1a1a22; }
+    .theme-swatch-light { background:#f4f4f8; }
+    .user-chip-av, .user-av { font-size:14px; line-height:1; }
+    /* Avatar picker grid (self + admin edit) */
+    .av-grid { display:grid; grid-template-columns:repeat(6, 1fr); gap:6px; margin:6px 0 2px; }
+    .av-choice { font-size:20px; line-height:1; padding:6px 0; border-radius:8px; border:1px solid var(--border); background:var(--panel); cursor:pointer; transition:all 0.12s; }
+    .av-choice:hover { background:var(--panel-hover); border-color:var(--border-strong); }
+    .av-choice.active { border-color:var(--accent); background:rgba(167,139,250,0.18); }
 
     /* Hide anything marked perm-gated until we know it's allowed. */
     .perm-gated { display:none; }
@@ -1238,6 +1307,17 @@
     /* ── Passcode overlay ── */
     .passcode-overlay { position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;display:flex;align-items:center;justify-content:center; }
     .passcode-card { background:rgba(14,14,24,0.97);border:1px solid var(--border-strong);border-radius:var(--radius);padding:32px 28px;max-width:320px;width:90%;text-align:center;backdrop-filter:blur(24px); }
+    /* Manage-removed modal */
+    .removed-card { background:rgba(14,14,24,0.97);border:1px solid var(--border-strong);border-radius:var(--radius);padding:20px 22px;width:min(560px,94vw);max-height:82vh;display:flex;flex-direction:column;backdrop-filter:blur(24px); }
+    .removed-head { display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px; }
+    .removed-title { font-size:16px;font-weight:600; }
+    .removed-sub { font-size:12px;color:var(--text-muted);margin-bottom:12px; }
+    .removed-list { overflow-y:auto;display:flex;flex-direction:column;gap:6px;min-height:60px; }
+    .removed-row { display:flex;align-items:center;gap:12px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--panel); }
+    .removed-row-info { min-width:0;flex:1; }
+    .removed-row-name { font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+    .removed-row-path { font-size:11px;color:var(--text-faint);font-family:var(--font-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left; }
+    .removed-empty { color:var(--text-faint);font-size:13px;padding:18px 4px;text-align:center; }
     .passcode-title { font-size:17px;font-weight:600;margin-bottom:6px; }
     .passcode-sub { font-size:13px;color:var(--text-muted);margin-bottom:16px; }
     .passcode-input { width:100%;text-align:center;letter-spacing:6px;font-size:22px;font-family:var(--font-mono);background:rgba(255,255,255,0.06);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:12px;outline:none;margin-bottom:8px; }
@@ -1455,6 +1535,97 @@
          hundreds of search tiles that's a lot of continuous repaint on a phone. */
       .photo-tile .tile-skeleton { animation: none; background: rgba(255,255,255,0.06); }
     }
+
+    /* ══════════════════════════════════════════════════════════════════════
+       THEMES — applied via data-theme on <html>. Default (no attribute) and
+       'purple' are the original Aurora look; 'dark' is a neutral dark and
+       'light' is a light variant. Only these three are offered. Themes are
+       per-account (server) with a localStorage mirror for no-flash on load.
+       ══════════════════════════════════════════════════════════════════════ */
+
+    /* ── Dark: neutral near-black, dimmer aurora, same purple accent ── */
+    :root[data-theme="dark"] {
+      --void: #0f0f13;
+      --accent-glow: rgba(167,139,250,0.18);
+    }
+    :root[data-theme="dark"] .aurora-bg { opacity: 0.45; }
+
+    /* ── Light ── */
+    :root[data-theme="light"] {
+      --void: #eef0f6;
+      --panel: rgba(20,22,45,0.05);
+      --panel-hover: rgba(20,22,45,0.09);
+      --border: rgba(20,22,45,0.12);
+      --border-strong: rgba(20,22,45,0.24);
+      --text: rgba(22,22,32,0.92);
+      --text-muted: rgba(22,22,32,0.55);
+      --text-faint: rgba(22,22,32,0.40);
+      --accent: #7c3aed;
+      --accent-sky: #0284c7;
+      --accent-orchid: #c026d3;
+      --accent-glow: rgba(124,58,237,0.22);
+    }
+    /* The screen-blended aurora blobs wash out to near-white on a light bg;
+       drop them so the light theme reads as a clean, flat surface. */
+    :root[data-theme="light"] .aurora-bg { display: none; }
+
+    /* Translucent dark chrome → translucent light chrome. */
+    :root[data-theme="light"] .sidebar { background: rgba(255,255,255,0.72); }
+    :root[data-theme="light"] .topbar { background: rgba(255,255,255,0.62); }
+    :root[data-theme="light"] .library-controls { background: rgba(255,255,255,0.5); }
+    :root[data-theme="light"] .bottom-nav { background: rgba(255,255,255,0.9); }
+    :root[data-theme="light"] .search-sidebar { background: rgba(255,255,255,0.4); }
+    :root[data-theme="light"] .place-detail { background: rgba(255,255,255,0.55); }
+    :root[data-theme="light"] .floating-month { background: rgba(255,255,255,0.85); color: var(--text); }
+    :root[data-theme="light"] .selection-bar,
+    :root[data-theme="light"] .rbac-dialog,
+    :root[data-theme="light"] .user-menu,
+    :root[data-theme="light"] .passcode-card,
+    :root[data-theme="light"] .removed-card,
+    :root[data-theme="light"] .sidebar-collapse,
+    :root[data-theme="light"] body.sidebar-collapsed .nav-item[data-tip]:hover::after {
+      background: rgba(255,255,255,0.98); color: var(--text);
+    }
+    :root[data-theme="light"] .map-placeholder { background: rgba(244,245,250,0.9); }
+    /* The lightbox + info panel are a self-contained dark media-viewing surface in
+       every theme (like Apple Photos). Re-declare the dark palette inside them so
+       their var(--text)/var(--accent) content stays light-on-dark and readable,
+       instead of flipping to dark text on the dark panel. */
+    :root[data-theme="light"] .lightbox,
+    :root[data-theme="light"] .meta-panel {
+      --text: rgba(255,255,255,0.92);
+      --text-muted: rgba(255,255,255,0.55);
+      --text-faint: rgba(255,255,255,0.35);
+      --panel: rgba(255,255,255,0.08);
+      --panel-hover: rgba(255,255,255,0.14);
+      --border: rgba(255,255,255,0.12);
+      --border-strong: rgba(255,255,255,0.24);
+      --accent: #a78bfa;
+      --accent-sky: #7dd3fc;
+      --accent-orchid: #f0abfc;
+    }
+    /* Map: a soft slate backdrop + stronger outlines so land reads on light. */
+    :root[data-theme="light"] .map-area { background: radial-gradient(ellipse at center, rgba(2,132,199,0.08) 0%, rgba(2,132,199,0.02) 70%); }
+    :root[data-theme="light"] .world-map path { fill: rgba(2,132,199,0.10); stroke: rgba(2,132,199,0.45); }
+    :root[data-theme="light"] .map-ctrl,
+    :root[data-theme="light"] .map-hint,
+    :root[data-theme="light"] .pin-label { background: rgba(255,255,255,0.9); color: var(--text); }
+    /* Form controls: keep a visible field + readable text on the light surface.
+       Range sliders are excluded — they have their own track/thumb styling and
+       some (the dual-range overlays) must stay transparent. */
+    :root[data-theme="light"] input:not([type=range]),
+    :root[data-theme="light"] textarea,
+    :root[data-theme="light"] select { background: rgba(0,0,0,0.045); color: var(--text); border-color: var(--border); }
+    /* …but inputs inside the always-dark media viewer keep their dark styling. */
+    :root[data-theme="light"] .meta-panel input:not([type=range]),
+    :root[data-theme="light"] .lightbox input:not([type=range]) { background: rgba(255,255,255,0.06); }
+    /* Mobile made the dark chrome extra-opaque for scroll legibility; match that
+       intent with an opaque light chrome. */
+    @media (max-width: 768px) {
+      :root[data-theme="light"] .topbar { background: rgba(255,255,255,0.94); }
+      :root[data-theme="light"] .library-controls { background: rgba(255,255,255,0.94); }
+      :root[data-theme="light"] .bottom-nav { background: rgba(255,255,255,0.96); }
+    }
   </style>
 </head>
 <body>
@@ -1509,6 +1680,13 @@
 
       <!-- LIBRARY -->
       <div class="screen active" id="screen-library">
+        <!-- Peek handle: appears when the toolbar auto-hides on scroll; click to bring it back. -->
+        <div class="chrome-peek" id="libChromePeek" onclick="expandLibChrome()" title="Show toolbar" role="button" tabindex="0">⌄</div>
+        <!-- The toolbar + time-range are an absolute OVERLAY (see .lib-chrome): they
+             slide up out of view on scroll-down and back down on scroll-up WITHOUT
+             resizing the gallery, so the photos never shift under you. The grid is
+             given a matching top inset (--lib-inset) so its first row sits below. -->
+        <div class="lib-chrome" id="libChrome">
         <div class="topbar">
           <span class="topbar-title">Library</span>
           <span class="topbar-count" id="libraryCount">— items</span>
@@ -1541,6 +1719,10 @@
             <span class="density-label" style="margin-left:8px;" id="densityVal">180px</span>
           </div>
         </div>
+        </div><!-- /.lib-chrome -->
+        <!-- The scroll-position date pill is pinned to the screen (NOT inside the
+             scrolling grid) so the grid's top inset can't shove it down the page. -->
+        <div class="floating-month" id="floatingMonth"></div>
         <div class="photo-grid-wrap" id="photoGridWrap">
           <div class="empty-state" id="libraryLoading">
             <div class="empty-icon" style="animation:spin 1s linear infinite;display:inline-block;">◌</div>
@@ -1551,7 +1733,6 @@
             <div class="empty-desc">Import a folder to start building your library. Aurora indexes metadata without touching your originals.</div>
             <button class="btn" onclick="switchScreen('settings')">Import photos</button>
           </div>
-          <div class="floating-month" id="floatingMonth"></div>
           <div id="photoGrid"></div>
         </div>
       </div>
@@ -1561,6 +1742,20 @@
         <div class="topbar">
           <span class="topbar-title">Places</span>
           <span class="topbar-count" id="placesCount">— locations</span>
+        </div>
+        <div class="library-controls places-controls" id="placesControls" style="display:none;">
+          <div class="slider-row" style="margin-bottom:0;">
+            <span class="slider-label">Time range</span>
+            <div class="range-wrap dual-range">
+              <div class="dual-track" id="pDualTrack">
+                <div class="dual-fill" id="pDualFill"></div>
+                <input type="range" id="pTimeFrom" min="0" max="100" value="0" aria-label="Places range start">
+                <input type="range" id="pTimeTo" min="0" max="100" value="100" aria-label="Places range end">
+              </div>
+              <div class="range-ticks" id="pRangeTicks"></div>
+            </div>
+            <button class="slider-value" id="pTimeRangeLabel" type="button" title="Reset to all time">All time</button>
+          </div>
         </div>
         <div class="places-layout">
           <div class="map-area" id="mapArea">
@@ -1736,6 +1931,11 @@
                 <input type="checkbox" id="toggleHideRaw" onchange="setHideRaw(this.checked)">
                 <span>Hide RAW photos <span style="color:var(--text-muted)">(.cr2 / .nef / .arw / .dng — can't be previewed in a browser)</span></span>
               </label>
+            </div>
+            <div class="import-card" data-perm="photos.delete">
+              <div class="import-card-title">Removed items</div>
+              <div class="card-help">Photos you removed from the library are hidden everywhere and won't re-import — but the original files are kept. Review them here and restore any that were removed by mistake.</div>
+              <button class="btn btn-ghost" style="margin-top:12px;" onclick="openRemovedManager()">Manage removed<span id="removedCountTag" style="color:var(--text-muted);"></span></button>
             </div>
           </div>
 
@@ -2047,7 +2247,15 @@
           <div class="stab-panel" id="stab-audit">
             <div class="import-card">
               <div class="import-card-title">Recent activity</div>
-              <div class="card-help">Every login, user/role change, and destructive action is logged here.</div>
+              <div class="card-help">Sign-ins, account &amp; role changes, and everyday actions (favorites, tags, hides, removals, albums, imports, downloads) are all logged here.</div>
+              <div class="audit-filter-bar" id="auditFilterBar">
+                <button class="audit-chip active" data-cat="" onclick="setAuditFilter(this)">All</button>
+                <button class="audit-chip" data-cat="auth" onclick="setAuditFilter(this)">Sign-in</button>
+                <button class="audit-chip" data-cat="photo" onclick="setAuditFilter(this)">Photos</button>
+                <button class="audit-chip" data-cat="album" onclick="setAuditFilter(this)">Albums</button>
+                <button class="audit-chip" data-cat="import" onclick="setAuditFilter(this)">Imports</button>
+                <button class="audit-chip" data-cat="admin" onclick="setAuditFilter(this)">Users &amp; roles</button>
+              </div>
               <div class="rbac-table-wrap"><table class="rbac-table" id="auditTable"><thead>
                 <tr><th>When</th><th>User</th><th>Action</th><th>Target</th><th>Details</th></tr>
               </thead><tbody><tr><td colspan="5" style="color:var(--text-faint);">Loading…</td></tr></tbody></table></div>
@@ -2116,6 +2324,18 @@
   <!-- Signed-in user menu (logout, etc.) — positioned via .user-menu absolute -->
   <div class="user-menu" id="userMenu"></div>
 
+  <!-- Manage removed items modal -->
+  <div class="passcode-overlay" id="removedOverlay" style="display:none;" onclick="if(event.target===this) closeRemovedManager()">
+    <div class="removed-card">
+      <div class="removed-head">
+        <div class="removed-title">Removed items</div>
+        <button class="btn btn-ghost" style="font-size:12px;" onclick="closeRemovedManager()">Close</button>
+      </div>
+      <div class="removed-sub" id="removedSub">Loading…</div>
+      <div class="removed-list" id="removedList"></div>
+    </div>
+  </div>
+
   <!-- Passcode modal -->
   <div class="passcode-overlay" id="passcodeOverlay" style="display:none;">
     <div class="passcode-card">
@@ -2172,6 +2392,7 @@
       <button class="sel-btn" data-perm="photos.tag" onclick="selStartRemoveTag()">－ Remove tag</button>
       <button class="sel-btn" data-perm="albums.manage" onclick="selStartAddToAlbum()">⊞ Album</button>
       <button class="sel-btn" id="selPrivateBtn" data-perm="photos.hidden" onclick="selHidePhotos()">🔒 Hide</button>
+      <button class="sel-btn" id="selRemoveBtn" data-perm="photos.delete" onclick="selRemovePhotos()">🗑 Remove</button>
       <button class="sel-btn" id="selShareBtn" data-perm="photos.download" onclick="shareSelection()">⤴ Share</button>
       <button class="sel-btn" onclick="exitSelectMode()">Done</button>
     </div>
@@ -2240,6 +2461,7 @@
       lightboxIdx: -1,
       lightboxItems: [],
       placeSelection: null,
+      placesFrom: 0, placesTo: 0,   // Places-map time-range slider (month indices)
       metaAssetId: null,
       selectMode: false,
       selected: new Set(),   // selected asset ids (multi-select)
@@ -2478,6 +2700,7 @@
       totalHeight: 0,
       rafPending: false,
       lastScrollTop: 0,
+      topInset: 0,           // px reserved at the top for the overlay chrome
     };
     function monthKeyOf(ms) { if (!ms) return 'unknown'; const d = new Date(ms); return d.getFullYear() + '-' + d.getMonth(); }
 
@@ -2493,11 +2716,28 @@
       const wrap = document.getElementById('photoGridWrap');
       wrap.scrollTop = 0; // jump to top on filter change
       vgrid.lastScrollTop = 0;
+      // Jumping to the top means the chrome should be shown; reset the scroll
+      // tracker so the next real scroll computes a sane delta.
+      if (typeof libChrome !== 'undefined') { libChrome.lastY = 0; libChrome.upAccum = 0; setLibChrome(false); }
       computeGridLayout();
       paintWindow(true);
     }
 
+    // Measure the overlay chrome's height and expose it as --lib-inset so the grid
+    // reserves matching top space (its first row sits below the bar; content then
+    // scrolls under it). offsetHeight is unaffected by the collapse transform, so
+    // this stays constant while hiding/showing — that's what keeps the gallery from
+    // reflowing. +6px of breathing room below the bar.
+    function updateLibInset() {
+      const chrome = document.getElementById('libChrome');
+      const screen = document.getElementById('screen-library');
+      if (!chrome || !screen) return;
+      const h = chrome.offsetHeight;
+      if (h > 0) { vgrid.topInset = h + 6; screen.style.setProperty('--lib-inset', vgrid.topInset + 'px'); }
+    }
+
     function computeGridLayout() {
+      updateLibInset();
       const wrap = document.getElementById('photoGridWrap');
       const grid = document.getElementById('photoGrid');
       const empty = document.getElementById('libraryEmpty');
@@ -2625,6 +2865,7 @@
 
     // Scroll handler — throttled to one paint per animation frame
     document.getElementById('photoGridWrap').addEventListener('scroll', () => {
+      updateLibChrome();
       if (vgrid.rafPending) return;
       vgrid.rafPending = true;
       requestAnimationFrame(() => {
@@ -2634,6 +2875,44 @@
         }
       });
     });
+
+    // ── Auto-hiding library chrome ──
+    // Collapse the toolbar + time-range on scroll-down to maximise gallery space.
+    // Revealing again needs a deliberate scroll UP — you must scroll up past a few
+    // rows' worth of distance (upAccum threshold) so a small nudge or the natural
+    // jitter at the end of a fling doesn't flick the toolbar back. Any downward
+    // scroll re-collapses and resets the accumulator.
+    const libChrome = { lastY: 0, collapsed: false, upAccum: 0 };
+    function setLibChrome(collapsed) {
+      if (libChrome.collapsed === collapsed) return;
+      libChrome.collapsed = collapsed;
+      document.getElementById('screen-library').classList.toggle('chrome-min', collapsed);
+    }
+    function updateLibChrome() {
+      const wrap = document.getElementById('photoGridWrap');
+      const y = wrap.scrollTop;
+      const dy = y - libChrome.lastY;
+      libChrome.lastY = y;
+      // Only hide once the content has scrolled past the bar's own height — below
+      // that the bar still overlaps the first rows, so hiding it would reveal an
+      // empty strip. Above it, always keep the bar shown.
+      const inset = vgrid.topInset || 140;
+      if (y < inset) { libChrome.upAccum = 0; setLibChrome(false); return; }
+      if (dy > 4) {                       // scrolling down → hide, reset the up-buffer
+        libChrome.upAccum = 0;
+        setLibChrome(true);
+      } else if (dy < 0) {                // scrolling up → only reveal after ~3.5 rows
+        if (!libChrome.collapsed) return;
+        libChrome.upAccum += -dy;
+        const rowH = vgrid.rowH || 120;
+        if (libChrome.upAccum > rowH * 3.5) { libChrome.upAccum = 0; setLibChrome(false); }
+      }
+    }
+    // The peek handle is an explicit request — reveal immediately.
+    function expandLibChrome() {
+      libChrome.upAccum = 0;
+      setLibChrome(false);
+    }
 
     // Re-layout on window resize
     let resizeTimer = null;
@@ -3163,9 +3442,12 @@
         img.style.display = 'none'; img.src = '';
         vid.style.display = 'block';
         vid.setAttribute('controls', ''); vid.loop = false;
+        clearVideoOrientation(vid);
+        vid.onloadedmetadata = () => applyVideoOrientation(item);
         vid.src = `/api/aurora/video/${item.id}`;
         vid.play().catch(() => {});
       } else {
+        clearVideoOrientation(vid); vid.onloadedmetadata = null;
         vid.style.display = 'none'; vid.pause(); vid.src = '';
         img.style.display = 'block';
         const cached = lbPreloadCache.get(item.id);
@@ -3213,7 +3495,8 @@
       const lb = document.getElementById('lightbox');
       lb.classList.remove('open', 'fill', 'chrome-hidden', 'is-video');
       const vid = document.getElementById('lightboxVideo');
-      vid.pause(); vid.src = ''; vid.classList.remove('live-overlay');
+      vid.pause(); vid.src = ''; vid.onloadedmetadata = null; vid.classList.remove('live-overlay');
+      clearVideoOrientation(vid);
       resetLightboxZoom();
       closeMetaPanel();
     }
@@ -3228,7 +3511,46 @@
       const lb = document.getElementById('lightbox');
       lb.classList.toggle('fill');
       document.getElementById('lbFitBtn').classList.toggle('active', lb.classList.contains('fill'));
+      // A CSS-rotated video is sized in JS, so re-fit it when the mode flips.
+      const item = state.lightboxItems[state.lightboxIdx];
+      if (item && item.kind === 'video') applyVideoOrientation(item);
     }
+
+    // ── Video orientation correction ──
+    // iOS players honour a portrait video's rotation matrix automatically; some
+    // Android browsers decode the raw (landscape) frame instead, so a portrait
+    // clip shows sideways and stretched. We detect that case — metadata rotation
+    // is 90/270 but the browser rendered it landscape — and rotate it ourselves,
+    // swapping the box dimensions so the aspect stays correct. Browsers that
+    // already rotated (portrait render) are left untouched.
+    function clearVideoOrientation(vid) {
+      vid.classList.remove('rotated');
+      vid.style.transform = ''; vid.style.width = ''; vid.style.height = ''; vid.style.objectFit = '';
+    }
+    function applyVideoOrientation(item) {
+      const vid = document.getElementById('lightboxVideo');
+      clearVideoOrientation(vid);
+      if (!item || item.kind !== 'video' || vid.classList.contains('live-overlay')) return;
+      const rot = ((item.rotation || 0) % 360 + 360) % 360;
+      if (rot !== 90 && rot !== 270) return;                 // only these produce the bug
+      const vw = vid.videoWidth, vh = vid.videoHeight;
+      if (!vw || !vh) return;                                // metadata not ready yet
+      if (vh > vw) return;                                   // browser already rotated it — fine
+      const stage = document.getElementById('lightboxStage').getBoundingClientRect();
+      const fill = document.getElementById('lightbox').classList.contains('fill');
+      vid.style.width = stage.height + 'px';
+      vid.style.height = stage.width + 'px';
+      vid.style.objectFit = fill ? 'cover' : 'contain';
+      vid.style.transform = 'rotate(' + rot + 'deg)';
+      vid.classList.add('rotated');
+    }
+    // Keep a rotated video correctly sized across viewport / orientation changes.
+    window.addEventListener('resize', () => {
+      const vid = document.getElementById('lightboxVideo');
+      if (vid && vid.classList.contains('rotated')) {
+        applyVideoOrientation(state.lightboxItems[state.lightboxIdx]);
+      }
+    });
 
     // Play a Live Photo's motion clip over the still, once, then restore the still.
     // The clip is shown as an absolutely-positioned overlay (.live-overlay) so it
@@ -3290,6 +3612,13 @@
 
     document.addEventListener('keydown', (e) => {
       if (!document.getElementById('lightbox').classList.contains('open')) return;
+      // Never hijack keystrokes while the user is typing (e.g. adding a tag in the
+      // info panel) — otherwise letters like "i"/"f" trigger lightbox shortcuts
+      // and, in the tag field, "i" closed the panel mid-word. Escape still works
+      // as a way out of the field; the rest are ignored when a field is focused.
+      const t = e.target;
+      const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+      if (typing) return;
       if (e.key === 'Escape') closeLightbox();
       if (e.key === 'ArrowRight') lightboxNav(1);
       if (e.key === 'ArrowLeft') lightboxNav(-1);
@@ -3506,6 +3835,13 @@
         rows.push(sect('Privacy'));
         rows.push(`<div style="margin:4px 0 8px;"><button id="metaPrivBtn" style="font-size:12px;${privStyle}" class="btn btn-ghost">${isHidden ? '🔓 ' : '🔒 '}${privLabel}</button></div>`);
 
+        // Remove-from-library section (soft delete; original file is never touched).
+        if (havePerm('photos.delete')) {
+          rows.push(sect('Manage'));
+          rows.push('<div style="margin:4px 0 8px;"><button id="metaRemoveBtn" style="font-size:12px;color:#f87171;" class="btn btn-ghost">🗑 Remove from library</button></div>');
+          rows.push('<div class="card-help" style="margin:0;">Hides it everywhere and stops it re-importing. The original file is kept and you can undo this from Settings → Manage removed.</div>');
+        }
+
         body.innerHTML = rows.filter(Boolean).join('');
 
         document.getElementById('metaPrivBtn').addEventListener('click', () => {
@@ -3515,6 +3851,8 @@
             togglePrivatePhoto(id, isHidden);
           }
         });
+        const removeBtn = document.getElementById('metaRemoveBtn');
+        if (removeBtn) removeBtn.addEventListener('click', () => removeAssetFromLibrary(id));
 
         renderMetaTags(a.tags || []);
         const input = document.getElementById('metaTagInput');
@@ -3725,14 +4063,138 @@
         // together at the current zoom so they don't overlap into an unreadable blob.
         mapPlaces = pts;
 
+        setupPlacesRange();   // wire the timeline slider to the loaded date domain
         applyMapView();
         setupMapInteractions();
       } catch(_) {}
     }
 
+    // ── Places timeline filter ──
+    // Shares the library's month domain (state.monthBase / totalMonths). Dragging
+    // narrows which pins show: instantly by an overlap test on each place's date
+    // span, then corrected to accurate in-range counts by a debounced /places
+    // fetch. The map view (pan/zoom) is preserved across changes.
+    const pTimeFrom = document.getElementById('pTimeFrom');
+    const pTimeTo = document.getElementById('pTimeTo');
+    const pDualFill = document.getElementById('pDualFill');
+    let placesRangeReady = false;
+    function setupPlacesRange() {
+      const controls = document.getElementById('placesControls');
+      // No usable date span → hide the control and show everything.
+      if (!state.totalMonths || state.totalMonths <= 1) {
+        controls.style.display = 'none';
+        placesRange = null; placesRangeCounts = null;
+        return;
+      }
+      controls.style.display = '';
+      const max = state.totalMonths - 1;
+      // First time in (or the domain grew): default to the full span.
+      if (!placesRangeReady || state.placesTo > max) { state.placesFrom = 0; state.placesTo = max; }
+      pTimeFrom.min = pTimeTo.min = 0;
+      pTimeFrom.max = pTimeTo.max = max;
+      pTimeFrom.value = state.placesFrom;
+      pTimeTo.value = state.placesTo;
+      placesRangeReady = true;
+      buildPlacesTicks();
+      updatePlacesLabel();
+      applyPlacesRange();
+    }
+    function buildPlacesTicks() {
+      const el = document.getElementById('pRangeTicks');
+      if (!el) return;
+      el.innerHTML = '';
+      const maxIdx = state.totalMonths - 1;
+      if (maxIdx < 1) return;
+      const marks = [];
+      for (let i = 0; i <= maxIdx; i++) if (new Date(addMonths(state.monthBase, i)).getMonth() === 0) marks.push(i);
+      const step = Math.max(1, Math.ceil(marks.length / 8));
+      for (let j = 0; j < marks.length; j += step) {
+        const i = marks[j], pct = (i / maxIdx) * 100;
+        const tick = document.createElement('span');
+        tick.className = 'range-tick';
+        tick.textContent = String(new Date(addMonths(state.monthBase, i)).getFullYear());
+        if (pct < 3) { tick.style.left = '0'; tick.style.transform = 'none'; }
+        else if (pct > 97) { tick.style.left = '100%'; tick.style.transform = 'translateX(-100%)'; }
+        else tick.style.left = pct + '%';
+        el.appendChild(tick);
+      }
+    }
+    function updatePlacesDualFill() {
+      const max = Math.max(1, state.totalMonths - 1);
+      const a = (state.placesFrom / max) * 100, b = (state.placesTo / max) * 100;
+      pDualFill.style.left = `calc(${a} * (100% - 18px) / 100 + 9px)`;
+      pDualFill.style.width = `calc(${Math.max(0, b - a)} * (100% - 18px) / 100)`;
+      pTimeFrom.style.zIndex = state.placesFrom > max / 2 ? 4 : 2;
+      pTimeTo.style.zIndex = 3;
+    }
+    function updatePlacesLabel() {
+      const lbl = document.getElementById('pTimeRangeLabel');
+      const full = state.placesFrom <= 0 && state.placesTo >= state.totalMonths - 1;
+      lbl.classList.toggle('narrowed', !full);
+      updatePlacesDualFill();
+      if (full) { lbl.textContent = 'All time'; lbl.title = ''; return; }
+      lbl.title = 'Reset to all time';
+      const from = addMonths(state.monthBase, state.placesFrom);
+      const to = addMonths(state.monthBase, state.placesTo);
+      lbl.textContent = state.placesFrom === state.placesTo ? fmtMonShort(from) : fmtMonShort(from) + ' – ' + fmtMonShort(to);
+    }
+    // Recompute placesRange from the slider, refresh pins instantly, and schedule
+    // an accurate-count fetch.
+    function applyPlacesRange() {
+      const max = state.totalMonths - 1;
+      const full = state.placesFrom <= 0 && state.placesTo >= max;
+      if (full) {
+        placesRange = null; placesRangeCounts = null;
+        clearTimeout(placesFetchTimer); placesFetchSeq++;
+        renderMapPins();
+        return;
+      }
+      const fromMs = addMonths(state.monthBase, state.placesFrom);
+      const toMs = addMonths(state.monthBase, state.placesTo + 1) - 1;
+      placesRange = { fromMs, toMs };
+      placesRangeCounts = null;    // fall back to instant overlap until the fetch lands
+      renderMapPins();
+      const seq = ++placesFetchSeq;
+      clearTimeout(placesFetchTimer);
+      placesFetchTimer = setTimeout(async () => {
+        try {
+          const qs = `?from=${fromMs}&to=${toMs}` + (state.hideRaw ? '&hideRaw=1' : '');
+          const rows = await fetch('/api/aurora/places' + qs).then(r => r.json());
+          if (seq !== placesFetchSeq) return;   // superseded by a newer drag
+          const m = new Map();
+          for (const p of rows) m.set(p.id, p.count);
+          placesRangeCounts = m;
+          renderMapPins();
+        } catch (_) {}
+      }, 180);
+    }
+    if (pTimeFrom) {
+      pTimeFrom.addEventListener('input', () => {
+        state.placesFrom = Math.min(parseInt(pTimeFrom.value), state.placesTo);
+        pTimeFrom.value = state.placesFrom;
+        updatePlacesLabel(); applyPlacesRange();
+      });
+      pTimeTo.addEventListener('input', () => {
+        state.placesTo = Math.max(parseInt(pTimeTo.value), state.placesFrom);
+        pTimeTo.value = state.placesTo;
+        updatePlacesLabel(); applyPlacesRange();
+      });
+      document.getElementById('pTimeRangeLabel').addEventListener('click', () => {
+        const max = state.totalMonths - 1;
+        if (state.placesFrom <= 0 && state.placesTo >= max) return;
+        state.placesFrom = 0; state.placesTo = max;
+        pTimeFrom.value = 0; pTimeTo.value = max;
+        updatePlacesLabel(); applyPlacesRange();
+      });
+    }
+
     // ── Pan / zoom for the Places map ──
     let mapView = null, mapHome = null, mapAR = 1, mapPlaces = [];
     let mapDragMoved = false, mapInteractionsReady = false, pinsRaf = false;
+    // Timeline filter state (see renderMapPins): placesRange is the active window
+    // in ms (null = all time); placesRangeCounts is the authoritative id→in-range
+    // count from the server, or null while a fetch is pending / at full range.
+    let placesRange = null, placesRangeCounts = null, placesFetchSeq = 0, placesFetchTimer = null;
 
     function applyMapView() {
       if (!mapView) return;
@@ -3757,13 +4219,26 @@
 
       const cells = new Map();
       for (const mp of mapPlaces) {
+        // ── Timeline filter ──
+        // placesRangeCounts (authoritative, from /places?from&to) decides both
+        // visibility and the count once it has loaded; before it does we fall back
+        // to an instant overlap test on the place's date span so pins drop off the
+        // moment the range narrows, with no wait for the server.
+        let cnt = mp.p.count;
+        if (placesRangeCounts) {
+          if (!placesRangeCounts.has(mp.p.id)) continue;   // no photos here in range
+          cnt = placesRangeCounts.get(mp.p.id);
+        } else if (placesRange) {
+          if (!(mp.p.first_date <= placesRange.toMs && mp.p.last_date >= placesRange.fromMs)) continue;
+        }
+        if (!cnt) continue;
         const sx = (mp.x - mapView.x) / mapView.w * w;
         const sy = (mp.y - mapView.y) / mapView.h * h;
         if (sx < -PIN_CELL || sy < -PIN_CELL || sx > w + PIN_CELL || sy > h + PIN_CELL) continue; // off-screen
         const key = Math.floor(sx / PIN_CELL) + ':' + Math.floor(sy / PIN_CELL);
         let c = cells.get(key);
         if (!c) { c = { places: [], count: 0, sx: 0, sy: 0 }; cells.set(key, c); }
-        c.places.push(mp.p); c.count += mp.p.count; c.sx += sx; c.sy += sy;
+        c.places.push(mp.p); c.count += cnt; c.sx += sx; c.sy += sy;
       }
 
       let maxCount = 1;
@@ -3950,15 +4425,23 @@
       const single = places.length === 1;
       const firsts = places.map(p => p.first_date).filter(Boolean);
       const lasts = places.map(p => p.last_date).filter(Boolean);
-      const firstDate = firsts.length ? Math.min(...firsts) : null;
-      const lastDate = lasts.length ? Math.max(...lasts) : null;
+      // When the timeline filter is active, the preview must honour it — same
+      // window the pins were filtered by — otherwise "back to 2020" still opened
+      // 2024 photos. Clamp the displayed date span to the window too.
+      const range = placesRange ? { from: placesRange.fromMs, to: placesRange.toMs } : null;
+      let firstDate = firsts.length ? Math.min(...firsts) : null;
+      let lastDate = lasts.length ? Math.max(...lasts) : null;
+      if (range) {
+        if (firstDate != null) firstDate = Math.max(firstDate, range.from);
+        if (lastDate != null) lastDate = Math.min(lastDate, range.to);
+      }
       const ids = places.map(p => p.id).join(',');
       const name = single
         ? ([places[0].name, places[0].country].filter(Boolean).join(', ') || 'Unknown location')
         : `${places.length} places nearby`;
 
       document.getElementById('placeDetailName').textContent = name;
-      state.placeSelection = { ids, name };
+      state.placeSelection = { ids, name, range };
 
       // Mark active pin
       document.querySelectorAll('.place-pin').forEach(p => p.classList.remove('active'));
@@ -3977,8 +4460,9 @@
       const mySeq = ++placeFetchSeq;
 
       try {
+        const rangeQs = range ? `&from=${range.from}&to=${range.to}` : '';
         const res = await fetch(
-          `/api/aurora/assets?place=${ids}&limit=12&count=1${state.hideRaw ? '&hideRaw=1' : ''}`,
+          `/api/aurora/assets?place=${ids}&limit=12&count=1${rangeQs}${state.hideRaw ? '&hideRaw=1' : ''}`,
           { signal: placeFetchCtrl.signal }
         ).then(r => r.json());
         // Late response for a superseded click — drop it silently.
@@ -4019,16 +4503,19 @@
       }
     }
 
-    // "View all" → hand off to the Search results page, filtered to this place.
+    // "View all" → hand off to the Search results page, filtered to this place
+    // (and to the map's timeline window when one is active).
     function placeViewAll() {
       if (!state.placeSelection || !state.placeSelection.ids) return;
-      searchPlace(state.placeSelection.ids, state.placeSelection.name);
+      searchPlace(state.placeSelection.ids, state.placeSelection.name, state.placeSelection.range);
     }
 
     // ── Search ── the unified results page (also used by Places "View all")
     const SEARCH_LIMIT = 500;
     let searchTimer = null, searchSeq = 0;
-    const searchState = { kind: '', camera: '', country: '', fav: false, placeIds: '', placeName: '', tag: '', tagName: '', terms: [] };
+    // dateFrom/dateTo (ms, 0 = inactive) ride along with the place filter — they
+    // are only ever set by the Places map hand-off and cleared with it.
+    const searchState = { kind: '', camera: '', country: '', fav: false, placeIds: '', placeName: '', tag: '', tagName: '', terms: [], dateFrom: 0, dateTo: 0 };
 
     // ── Search term chips ──
     // Each Enter commits the current word as a removable chip; all chips are ANDed
@@ -4105,12 +4592,16 @@
 
     function clearSearchPlace() {
       searchState.placeIds = ''; searchState.placeName = '';
+      searchState.dateFrom = 0; searchState.dateTo = 0;
       runSearch();
     }
 
     // Entry point from the Places screen: open Search filtered to a place/cluster.
-    function searchPlace(ids, name) {
+    // `range` ({from,to} ms) is the map's timeline window, when one is active.
+    function searchPlace(ids, name, range) {
       searchState.placeIds = String(ids); searchState.placeName = name || 'Selected place';
+      searchState.dateFrom = range && range.from ? range.from : 0;
+      searchState.dateTo = range && range.to ? range.to : 0;
       searchState.kind = ''; searchState.camera = ''; searchState.country = ''; searchState.fav = false; searchState.tag = ''; searchState.tagName = '';
       const input = document.getElementById('searchInput'); if (input) input.value = ''; clearSearchTerms();
       switchScreen('search');
@@ -4120,6 +4611,7 @@
     function searchTag(tagId, name) {
       searchState.tag = String(tagId); searchState.tagName = name || '';
       searchState.kind = ''; searchState.camera = ''; searchState.country = ''; searchState.fav = false; searchState.placeIds = ''; searchState.placeName = '';
+      searchState.dateFrom = 0; searchState.dateTo = 0;
       const input = document.getElementById('searchInput'); if (input) input.value = ''; clearSearchTerms();
       closeMetaPanel();
       switchScreen('search');
@@ -4326,14 +4818,21 @@
         if (searchState.country) params.set('country', searchState.country);
         if (searchState.fav) params.set('fav', '1');
         if (searchState.placeIds) params.set('place', searchState.placeIds);
+        // Timeline window handed over from the Places map — rides with the place.
+        if (searchState.dateFrom) params.set('from', searchState.dateFrom);
+        if (searchState.dateTo) params.set('to', searchState.dateTo);
         if (searchState.tag) params.set('tag', searchState.tag);
         if (state.hideRaw) params.set('hideRaw', '1');
       }
 
-      // Active place-filter banner
+      // Active place-filter banner (includes the timeline window when set, so
+      // it's obvious why older/newer photos are absent — and the ✕ clears both).
       const pf = document.getElementById('searchPlaceFilter');
       if (searchState.placeIds) {
-        document.getElementById('searchPlaceFilterName').textContent = '◎ ' + searchState.placeName;
+        const span = (searchState.dateFrom || searchState.dateTo)
+          ? '  ·  ' + fmtMonShort(searchState.dateFrom) + ' – ' + fmtMonShort(searchState.dateTo)
+          : '';
+        document.getElementById('searchPlaceFilterName').textContent = '◎ ' + searchState.placeName + span;
         pf.style.display = 'inline-flex';
       } else pf.style.display = 'none';
 
@@ -5273,6 +5772,7 @@
             ['Date range', dateRange],
             ...(lib.hidden ? [['Hidden (private)', lib.hidden.toLocaleString()]] : []),
             ...(lib.duplicates_hidden ? [['Duplicates hidden', lib.duplicates_hidden.toLocaleString()]] : []),
+            ...(lib.removed ? [['Removed', lib.removed.toLocaleString()]] : []),
           ]) +
           card('Storage', [
             ['Originals', fmtBytes(lib.total_bytes)],
@@ -5289,6 +5789,9 @@
             ['Import errors', (im.total_errors || 0).toLocaleString()],
             ['Interrupted imports', (im.interrupted || 0).toLocaleString()],
           ]);
+
+        const rct = document.getElementById('removedCountTag');
+        if (rct) rct.textContent = lib.removed ? ` · ${lib.removed.toLocaleString()}` : '';
 
         // Recent imports
         const imp = document.getElementById('settingsImports');
@@ -5852,6 +6355,98 @@
       } catch (_) { toast('Failed to update photo'); }
     }
 
+    // Soft-remove one asset from the library (kept on disk, reversible in Settings).
+    async function removeAssetFromLibrary(id) {
+      if (!confirm('Remove this from your library?\n\nIt will be hidden everywhere and won\'t re-import, but the original file is kept and you can restore it from Settings → Manage removed.')) return;
+      try {
+        const r = await fetch('/api/aurora/assets/remove', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assetIds: [id] })
+        }).then(r => r.json());
+        if (r.error) { toast('Remove failed: ' + r.error); return; }
+        toast('Removed from library');
+        closeLightbox();
+        loadStats();
+        if (state.hiddenMode) runSearch(); else loadIndex();
+      } catch (_) { toast('Failed to remove'); }
+    }
+
+    // ── Manage removed (undo soft-remove) ──
+    async function openRemovedManager() {
+      const ov = document.getElementById('removedOverlay');
+      ov.style.display = 'flex';
+      document.getElementById('removedSub').textContent = 'Loading…';
+      document.getElementById('removedList').innerHTML = '';
+      await refreshRemovedList();
+    }
+    function closeRemovedManager() { document.getElementById('removedOverlay').style.display = 'none'; }
+    async function refreshRemovedList() {
+      const listEl = document.getElementById('removedList');
+      const subEl = document.getElementById('removedSub');
+      try {
+        const r = await fetch('/api/aurora/assets/removed').then(r => r.json());
+        const rows = (r && r.removed) || [];
+        subEl.textContent = rows.length
+          ? `${rows.length} removed item${rows.length === 1 ? '' : 's'} · originals kept on disk`
+          : 'Nothing has been removed.';
+        listEl.innerHTML = rows.length ? '' : '<div class="removed-empty">No removed items. Anything you remove from the library shows up here so you can undo it.</div>';
+        for (const a of rows) {
+          const row = document.createElement('div');
+          row.className = 'removed-row';
+          const info = document.createElement('div');
+          info.className = 'removed-row-info';
+          const name = document.createElement('div');
+          name.className = 'removed-row-name';
+          name.textContent = (a.kind === 'video' ? '🎞 ' : '🖼 ') + (a.filename || 'Unknown');
+          const p = document.createElement('div');
+          p.className = 'removed-row-path';
+          p.textContent = a.path || '';
+          p.title = a.path || '';
+          info.appendChild(name); info.appendChild(p);
+          const btn = document.createElement('button');
+          btn.className = 'btn btn-ghost';
+          btn.style.fontSize = '12px';
+          btn.textContent = 'Restore';
+          btn.addEventListener('click', () => restoreRemoved(a.id, btn));
+          row.appendChild(info); row.appendChild(btn);
+          listEl.appendChild(row);
+        }
+      } catch (_) {
+        subEl.textContent = 'Failed to load removed items.';
+      }
+    }
+    async function restoreRemoved(id, btn) {
+      const done = btnBusy(btn, 'Restoring…');
+      try {
+        const r = await fetch('/api/aurora/assets/restore', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assetIds: [id] })
+        }).then(r => r.json());
+        if (r.error) { toast('Restore failed: ' + r.error); done(); return; }
+        toast('Restored to library');
+        await refreshRemovedList();
+        loadStats(); loadIndex();
+      } catch (_) { toast('Restore failed'); done(); }
+    }
+
+    // Soft-remove the current multi-selection.
+    async function selRemovePhotos() {
+      const ids = [...state.selected];
+      if (!ids.length) return;
+      if (!confirm(`Remove ${ids.length} item${ids.length === 1 ? '' : 's'} from your library?\n\nThey'll be hidden everywhere and won't re-import, but the originals are kept and you can restore them from Settings → Manage removed.`)) return;
+      try {
+        const r = await fetch('/api/aurora/assets/remove', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assetIds: ids })
+        }).then(r => r.json());
+        if (r.error) { toast('Remove failed: ' + r.error); return; }
+        toast(`${ids.length} removed from library`);
+        exitSelectMode();
+        loadStats();
+        loadIndex();
+      } catch (_) { toast('Failed to remove'); }
+    }
+
     // Hide the current selection
     async function selHidePhotos() {
       const ids = [...state.selected];
@@ -6140,6 +6735,7 @@
         const r = await fetch('/api/aurora/auth/me');
         if (!r.ok) return;
         window.AURORA_ME = await r.json();
+        applyTheme(window.AURORA_ME.theme || 'purple');
         applyPermissionsToUI();
         renderUserChip();
         // If the account is flagged (admin reset, or admin created a fresh
@@ -6238,23 +6834,39 @@
       };
     })();
 
+    // A user's chosen glyph, or the default person icon.
+    function avatarGlyph(a) { return (a && String(a).trim()) || '👤'; }
+    // Preset icons offered in the avatar picker (users & roles + self menu).
+    const AVATAR_CHOICES = ['👤','😀','😎','🦊','🐱','🐶','🐼','🦉','🌸','🌟','🔥','🌊','🏔','📷','🎸','⚽','🚀','👑','🦄','🍀','🎨','☕'];
     function renderUserChip() {
       const me = window.AURORA_ME;
       if (!me) return;
-      // Insert the chip into the topbar of whichever screen is showing one.
-      // The main app screens all have a .topbar element with room on the right.
+      const glyph = avatarGlyph(me.avatar);
+      // Insert the chip into the topbar of whichever screen is showing one, or
+      // refresh the icon on chips that already exist (avatar can change at runtime).
       document.querySelectorAll('.topbar').forEach(bar => {
-        if (bar.querySelector('.user-chip')) return;
-        const chip = document.createElement('button');
-        chip.className = 'user-chip';
+        let chip = bar.querySelector('.user-chip');
+        if (!chip) {
+          chip = document.createElement('button');
+          chip.className = 'user-chip';
+          chip.onclick = toggleUserMenu;
+          bar.appendChild(chip);
+        }
         chip.title = 'Signed in as ' + me.username + ' (' + me.role + ')';
-        chip.innerHTML = '<span>👤</span><span>' + escapeHtml(me.username) + '</span>';
-        chip.onclick = toggleUserMenu;
-        bar.appendChild(chip);
+        chip.innerHTML = '<span class="user-chip-av">' + escapeHtml(glyph) + '</span><span>' + escapeHtml(me.username) + '</span>';
       });
       const menu = document.getElementById('userMenu');
+      const themeRow = (t, label) =>
+        '<div class="row theme-row' + ((me.theme || 'purple') === t ? ' active' : '') + '" onclick="setMyTheme(\'' + t + '\')">' +
+          '<span class="theme-swatch theme-swatch-' + t + '"></span>' + label +
+        '</div>';
       menu.innerHTML =
-        '<div class="row head">' + escapeHtml(me.username) + ' · ' + escapeHtml(me.role) + '</div>' +
+        '<div class="row head">' + escapeHtml(glyph) + ' ' + escapeHtml(me.username) + ' · ' + escapeHtml(me.role) + '</div>' +
+        '<div class="row sub-head">Theme</div>' +
+        themeRow('purple', 'Aurora (purple)') +
+        themeRow('dark', 'Dark') +
+        themeRow('light', 'Light') +
+        '<div class="row sep" onclick="openMyAvatarDialog()">Choose icon…</div>' +
         '<div class="row" onclick="openChangePinDialog()">Change PIN</div>' +
         '<div class="row" onclick="doLogout()">Sign out</div>';
     }
@@ -6270,6 +6882,58 @@
       try { await fetch('/api/aurora/auth/logout', { method: 'POST' }); } catch (_) {}
       location.replace('/login');
     }
+
+    // ── Theme (per-account) ────────────────────────────────────────────
+    // 'purple' is the default Aurora look; 'dark' is a neutral dark; 'light' is
+    // a light variant. Applied via data-theme on <html>; persisted per account
+    // (server) and mirrored to localStorage so it applies instantly on next boot
+    // with no flash before /me returns.
+    const THEMES = ['purple', 'dark', 'light'];
+    function applyTheme(theme) {
+      const t = THEMES.includes(theme) ? theme : 'purple';
+      document.documentElement.setAttribute('data-theme', t);
+      try { localStorage.setItem('aurora.theme', t); } catch (_) {}
+    }
+    async function setMyTheme(theme) {
+      if (!THEMES.includes(theme)) return;
+      applyTheme(theme);
+      if (window.AURORA_ME) window.AURORA_ME.theme = theme;
+      renderUserChip();
+      document.getElementById('userMenu').classList.add('show'); // keep menu open to show the tick
+      try {
+        await fetch('/api/aurora/auth/prefs', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ theme })
+        });
+      } catch (_) {}
+    }
+
+    // Self-service avatar picker (from the account menu).
+    function openMyAvatarDialog() {
+      document.getElementById('userMenu').classList.remove('show');
+      const me = window.AURORA_ME || {};
+      const cur = me.avatar || '';
+      const swatches = AVATAR_CHOICES.map(g =>
+        `<button class="av-choice${g === cur ? ' active' : ''}" onclick="pickMyAvatar('${g}')">${g}</button>`).join('');
+      openRbacDialog(`
+        <h3>Choose your icon</h3>
+        <div class="av-grid">${swatches}</div>
+        <div class="rbac-hint">Shown next to your name across Aurora.</div>
+        <div class="actions"><button class="btn btn-ghost" onclick="closeRbacDialog()">Close</button></div>
+      `);
+    }
+    async function pickMyAvatar(glyph) {
+      const avatar = glyph === '👤' ? '' : glyph;   // person glyph = clear/default
+      if (window.AURORA_ME) window.AURORA_ME.avatar = avatar;
+      renderUserChip();
+      closeRbacDialog();
+      try {
+        await fetch('/api/aurora/auth/prefs', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ avatar })
+        });
+      } catch (_) {}
+    }
     function escapeHtml(s) {
       return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
         ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -6283,16 +6947,18 @@
       const tbody = document.querySelector('#usersTable tbody');
       const rolesRes = await fetch('/api/aurora/auth/admin/roles');
       const { roles } = rolesRes.ok ? await rolesRes.json() : { roles: [] };
+      window._usersCache = users;
       tbody.innerHTML = users.map(u => {
         const roleOptions = roles.map(r => `<option value="${escapeHtml(r.name)}"${r.name===u.role_name?' selected':''}>${escapeHtml(r.name)}</option>`).join('');
         const badge = u.role_name === 'admin' ? 'admin' : u.role_name === 'user' ? 'user' : 'custom';
         const last = u.last_seen_at ? new Date(u.last_seen_at).toLocaleString() : '—';
         return `<tr>
-          <td>${escapeHtml(u.username)}</td>
+          <td><span class="user-av">${escapeHtml(avatarGlyph(u.avatar))}</span> ${escapeHtml(u.username)}</td>
           <td><select onchange="setUserRole(${u.id}, this.value)">${roleOptions}</select> <span class="rbac-badge ${badge}">${escapeHtml(u.role_name)}</span></td>
           <td>${u.disabled ? '<span class="rbac-badge disabled">disabled</span>' : '<span class="muted">active</span>'}</td>
           <td class="muted">${last}</td>
           <td><div class="rbac-row-actions">
+            <button class="btn btn-ghost" onclick="openUserEditDialog(${u.id})">Edit</button>
             <button class="btn btn-ghost" onclick="resetUserPin(${u.id}, '${escapeHtml(u.username)}')">Reset PIN</button>
             <button class="btn btn-ghost" onclick="toggleUserDisabled(${u.id}, ${u.disabled ? 0 : 1})">${u.disabled ? 'Enable' : 'Disable'}</button>
             <button class="btn btn-ghost" onclick="deleteUser(${u.id}, '${escapeHtml(u.username)}')" style="color:#f87171;">Delete</button>
@@ -6385,6 +7051,53 @@
       loadUsers();
     }
 
+    // ── Admin: edit a user's name + icon ──
+    let _editUserAvatar = '';
+    function openUserEditDialog(id) {
+      const u = (window._usersCache || []).find(x => x.id === id);
+      if (!u) return;
+      _editUserAvatar = u.avatar || '';
+      const swatches = AVATAR_CHOICES.map(g =>
+        `<button type="button" class="av-choice${(g === '👤' ? (_editUserAvatar === '') : (g === _editUserAvatar)) ? ' active' : ''}" data-glyph="${g}" onclick="selectEditAvatar(this)">${g}</button>`).join('');
+      openRbacDialog(`
+        <h3>Edit ${escapeHtml(u.username)}</h3>
+        <label class="field">Username</label>
+        <input type="text" id="ue_name" autocomplete="off" spellcheck="false" value="${escapeHtml(u.username)}">
+        <label class="field">Icon</label>
+        <div class="av-grid" id="ue_avgrid">${swatches}</div>
+        <div class="err" id="rd_err"></div>
+        <div class="actions">
+          <button class="btn btn-ghost" onclick="closeRbacDialog()">Cancel</button>
+          <button class="btn" onclick="submitUserProfile(${id})">Save</button>
+        </div>
+      `);
+      setTimeout(() => { const el = document.getElementById('ue_name'); if (el) el.focus(); }, 30);
+    }
+    function selectEditAvatar(btn) {
+      const g = btn.dataset.glyph;
+      _editUserAvatar = g === '👤' ? '' : g;
+      document.querySelectorAll('#ue_avgrid .av-choice').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    }
+    async function submitUserProfile(id) {
+      const username = document.getElementById('ue_name').value.trim();
+      const r = await fetch('/api/aurora/auth/admin/users/' + id + '/profile', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, avatar: _editUserAvatar }),
+      });
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) return showRbacErr(b.error || 'Failed');
+      closeRbacDialog();
+      toast('User updated');
+      loadUsers();
+      // If the admin edited their own account, refresh the chip immediately.
+      if (window.AURORA_ME && window.AURORA_ME.userId === id) {
+        window.AURORA_ME.username = username;
+        window.AURORA_ME.avatar = _editUserAvatar;
+        renderUserChip();
+      }
+    }
+
     // ── Roles tab ──────────────────────────────────────────────────────
     async function loadRoles() {
       const r = await fetch('/api/aurora/auth/admin/roles');
@@ -6462,19 +7175,47 @@
     }
 
     // ── Audit log tab ──────────────────────────────────────────────────
+    // 'admin' groups the user.* and role.* families; everything else filters by
+    // the action prefix, done server-side via the ?category= param.
+    let auditCategory = '';
+    function setAuditFilter(btn) {
+      document.querySelectorAll('#auditFilterBar .audit-chip').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      auditCategory = btn.dataset.cat || '';
+      loadAudit();
+    }
+    // Friendly labels for the action codes so the log reads in plain English.
+    const AUDIT_LABELS = {
+      'auth.login': 'Signed in', 'auth.login.fail': 'Failed sign-in', 'auth.logout': 'Signed out',
+      'auth.setup': 'Claimed admin', 'auth.pin.change': 'Changed PIN',
+      'photo.favorite': 'Favorited', 'photo.unfavorite': 'Un-favorited',
+      'photo.tag.add': 'Added tag', 'photo.tag.remove': 'Removed tag',
+      'photo.hide': 'Hid photo', 'photo.unhide': 'Un-hid photo',
+      'photo.remove': 'Removed from library', 'photo.restore': 'Restored to library',
+      'photo.download': 'Downloaded original',
+      'album.create': 'Created album', 'album.delete': 'Deleted album',
+      'import.start': 'Started import', 'import.reindex': 'Re-indexed metadata',
+      'user.create': 'Created user', 'user.delete': 'Deleted user', 'user.role': 'Changed role',
+      'user.disabled': 'Enabled/disabled user', 'user.pin.reset': 'Reset PIN', 'user.profile': 'Edited profile',
+      'role.create': 'Created role', 'role.update': 'Updated role', 'role.delete': 'Deleted role',
+    };
+    function auditLabel(action) { return AUDIT_LABELS[action] || action; }
     async function loadAudit() {
-      const r = await fetch('/api/aurora/auth/admin/audit?limit=200');
+      const qs = '?limit=400' + (auditCategory === 'admin' ? '' : (auditCategory ? '&category=' + encodeURIComponent(auditCategory) : ''));
+      const r = await fetch('/api/aurora/auth/admin/audit' + qs);
       if (!r.ok) return;
-      const { entries } = await r.json();
+      let { entries } = await r.json();
+      // 'admin' spans two action families (user.* + role.*) — filter client-side.
+      if (auditCategory === 'admin') entries = entries.filter(e => /^(user|role)\./.test(e.action));
       const tbody = document.querySelector('#auditTable tbody');
       tbody.innerHTML = entries.map(e => `
         <tr>
           <td class="muted" style="white-space:nowrap;">${new Date(e.ts).toLocaleString()}</td>
           <td>${escapeHtml(e.username || '—')}</td>
-          <td><code style="font-size:11px;">${escapeHtml(e.action)}</code></td>
+          <td title="${escapeHtml(e.action)}">${escapeHtml(auditLabel(e.action))}</td>
           <td class="muted">${escapeHtml(e.target || '')}</td>
           <td class="muted" style="font-size:11px;max-width:280px;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(e.details || '')}</td>
-        </tr>`).join('') || '<tr><td colspan="5" class="muted">No entries.</td></tr>';
+        </tr>`).join('') || '<tr><td colspan="5" class="muted">No entries in this category.</td></tr>';
     }
 
     // ── RBAC dialog helpers ────────────────────────────────────────────
@@ -6522,6 +7263,10 @@
       await loadMe();
       await loadStats();
       await loadIndex();
+      // Web fonts can change the toolbar's height after first paint — remeasure
+      // the overlay inset once they've settled so the gallery's top offset is exact.
+      try { await document.fonts.ready; } catch (_) {}
+      updateLibInset();
     })();
   </script>
 </body>

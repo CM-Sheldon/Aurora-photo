@@ -14,7 +14,7 @@ const path = require('path');
 const db = require('../services/auroraDbService');
 const { getThumbPath, ensureThumb, videoMimeType } = require('../services/auroraIndexerService');
 
-const VISIBLE = 'a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL';
+const VISIBLE = 'a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL AND removed = 0';
 
 async function albumForToken(token) {
   if (!token || typeof token !== 'string' || token.length > 64) return null;

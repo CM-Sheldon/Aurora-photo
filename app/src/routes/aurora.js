@@ -11,6 +11,7 @@ const { startImport, getSession, getThumbPath, ensureThumb, videoMimeType,
 const { mountShare, unmountShare, isMounted, listActiveMounts, MOUNT_BASE } = require('../services/shareMountService');
 const geocoder = require('../services/auroraGeocoderService');
 const captioner = require('../services/auroraCaptionService');
+const auth = require('../services/auroraAuthService');   // audit() — usage logging
 const sharp = require('sharp');   // used to transcode caption images to JPEG (vision LLMs reject webp)
 const { requirePerm } = require('../middleware/auth');
 // NOTE (2026-07-15): the old COCO-SSD "content labels" feature was removed —
@@ -199,8 +200,10 @@ function buildAssetFilters(query, exclude = new Set()) {
   if (query.fav === '1' && !exclude.has('fav')) base.push('a.fav = 1');
   if (query.hideRaw === '1') { const r = rawExclusion('a.path'); base.push(r.sql); params.push(...r.params); }
   base.push('a.is_live_motion = 0');
+  // Soft-removed assets never appear anywhere — not even in the Hidden album.
+  base.push('a.removed = 0');
   if (query.showHidden === '1') base.push('a.hidden = 1');
-  else { base.push('a.hidden = 0'); base.push('a.duplicate_of IS NULL'); }
+  else { base.push('a.hidden = 0'); base.push('a.duplicate_of IS NULL AND removed = 0'); }
   return { clauses: base, params };
 }
 
@@ -230,7 +233,7 @@ router.get('/assets', async (req, res) => {
       (await db.get(`SELECT COUNT(*) AS c ${FROM} WHERE ${clauses.join(' AND ')}`, params)).c;
 
     const SELECT_SQL = `SELECT a.id, a.path, a.kind, a.taken_at, a.width, a.height, a.duration_s,
-              a.gps_lat, a.gps_lon, a.fav, a.camera, a.live_video_id,
+              a.gps_lat, a.gps_lon, a.fav, a.camera, a.live_video_id, a.rotation,
               p.name AS place_name, p.country AS place_country
        ${FROM}
        WHERE {WHERE}
@@ -441,7 +444,7 @@ router.get('/assets/index', async (req, res) => {
     const extra = req.query.hideRaw === '1' ? rawExclusion('path') : { sql: '', params: [] };
     const rows = await db.all(
       `SELECT id, taken_at AS t, kind AS k, fav AS f, live_video_id AS lv FROM assets
-       WHERE is_live_motion = 0 AND hidden = 0 AND duplicate_of IS NULL${extra.sql ? ' AND ' + extra.sql : ''}
+       WHERE is_live_motion = 0 AND hidden = 0 AND duplicate_of IS NULL AND removed = 0${extra.sql ? ' AND ' + extra.sql : ''}
        ORDER BY CASE WHEN taken_at IS NULL THEN 1 ELSE 0 END, taken_at DESC`,
       extra.params
     );
@@ -527,6 +530,7 @@ router.get('/original/:id', requirePerm('photos.download'), async (req, res) => 
     const ct = ORIGINAL_TYPES[ext] || (asset.kind === 'video' ? videoMimeType(asset.path) : 'application/octet-stream');
     const name = path.basename(asset.path).replace(/["\r\n]/g, '');
     const disp = req.query.dl ? 'attachment' : 'inline';   // ?dl=1 → force download (share fallback)
+    if (req.query.dl) auth.audit(req.user, 'photo.download', String(req.params.id));
     res.setHeader('Content-Type', ct);
     res.setHeader('Content-Disposition', `${disp}; filename="${name}"`);
     res.setHeader('Cache-Control', 'private, max-age=3600');
@@ -586,23 +590,32 @@ router.get('/share/zip', requirePerm('photos.download'), async (req, res) => {
   }
 });
 
-// GET /api/aurora/places?hideRaw=1
+// GET /api/aurora/places?hideRaw=1&from=<ms>&to=<ms>
 // hideRaw MUST match the caller's setting: the map pin count has to reflect what
 // GET /assets?place=X&hideRaw=X will actually return, otherwise a RAW-only place
 // reads "N photos" on the pin but its preview grid comes back empty.
+// from/to restrict the count (and which pins survive HAVING > 0) to a capture-date
+// window — this powers the Places-map timeline filter, so a place with no photos
+// in the selected range simply drops off the map. The scan is over the indexed
+// taken_at, so it stays fast enough for interactive dragging.
 router.get('/places', async (req, res) => {
   try {
     const extra = req.query.hideRaw === '1' ? rawExclusion('a.path') : { sql: '', params: [] };
+    const range = [], rangeParams = [];
+    const from = parseInt(req.query.from, 10), to = parseInt(req.query.to, 10);
+    if (Number.isFinite(from)) { range.push('a.taken_at >= ?'); rangeParams.push(from); }
+    if (Number.isFinite(to))   { range.push('a.taken_at <= ?'); rangeParams.push(to); }
     const rows = await db.all(
       `SELECT p.id, p.name, p.country, p.lat, p.lon, COUNT(a.id) AS count,
               MIN(a.taken_at) AS first_date, MAX(a.taken_at) AS last_date
        FROM places p
-       JOIN assets a ON a.place_id = p.id AND a.is_live_motion = 0 AND a.hidden = 0 AND a.duplicate_of IS NULL
+       JOIN assets a ON a.place_id = p.id AND a.is_live_motion = 0 AND a.hidden = 0 AND a.duplicate_of IS NULL AND removed = 0
        ${extra.sql ? 'AND ' + extra.sql : ''}
+       ${range.length ? 'AND ' + range.join(' AND ') : ''}
        GROUP BY p.id
        HAVING COUNT(a.id) > 0
        ORDER BY count DESC`,
-      extra.params
+      [...extra.params, ...rangeParams]
     );
     res.json(rows);
   } catch (err) {
@@ -633,7 +646,7 @@ router.get('/stats', async (req, res) => {
               SUM(bytes) AS total_bytes,
               MIN(taken_at) AS earliest,
               MAX(taken_at) AS latest
-       FROM assets WHERE is_live_motion = 0 AND hidden = 0 AND duplicate_of IS NULL`
+       FROM assets WHERE is_live_motion = 0 AND hidden = 0 AND duplicate_of IS NULL AND removed = 0`
     );
     const places = await db.get('SELECT COUNT(*) AS count FROM places');
     res.json({ ...totals, place_count: places.count });
@@ -659,7 +672,7 @@ router.get('/countries', async (req, res) => {
   try {
     const rows = await db.all(
       `SELECT p.country AS country, COUNT(a.id) AS count
-       FROM places p JOIN assets a ON a.place_id = p.id AND a.is_live_motion = 0 AND a.hidden = 0 AND a.duplicate_of IS NULL
+       FROM places p JOIN assets a ON a.place_id = p.id AND a.is_live_motion = 0 AND a.hidden = 0 AND a.duplicate_of IS NULL AND removed = 0
        WHERE p.country IS NOT NULL AND p.country != ''
        GROUP BY p.country ORDER BY count DESC`
     );
@@ -678,7 +691,7 @@ router.get('/tags', async (req, res) => {
       `SELECT t.id, t.name, COUNT(a.id) AS count
        FROM tags t
        LEFT JOIN asset_tags at ON at.tag_id = t.id
-       LEFT JOIN assets a ON a.id = at.asset_id AND a.is_live_motion = 0 AND a.hidden = 0 AND a.duplicate_of IS NULL
+       LEFT JOIN assets a ON a.id = at.asset_id AND a.is_live_motion = 0 AND a.hidden = 0 AND a.duplicate_of IS NULL AND removed = 0
        GROUP BY t.id ORDER BY count DESC, t.name COLLATE NOCASE`
     );
     res.json(rows);
@@ -706,6 +719,7 @@ router.post('/tags/apply', requirePerm('photos.tag'), async (req, res) => {
       );
       added += r.changes || 0;
     }
+    auth.audit(req.user, 'photo.tag.add', assetIds.length === 1 ? String(assetIds[0]) : null, { tag: tag.name, added });
     res.json({ tagId: tag.id, name: tag.name, added, requested: assetIds.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -722,6 +736,7 @@ router.post('/tags/remove', requirePerm('photos.tag'), async (req, res) => {
     for (const id of assetIds) await db.run('DELETE FROM asset_tags WHERE tag_id = ? AND asset_id = ?', [tagId, id]);
     const left = (await db.get('SELECT COUNT(*) AS c FROM asset_tags WHERE tag_id = ?', [tagId])).c;
     if (left === 0) await db.run('DELETE FROM tags WHERE id = ?', [tagId]);
+    auth.audit(req.user, 'photo.tag.remove', assetIds.length === 1 ? String(assetIds[0]) : null, { tagId, count: assetIds.length });
     res.json({ ok: true, remaining: left });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -888,6 +903,7 @@ router.post('/tags/bulk', requirePerm('photos.tag'), async (req, res) => {
         const r = await db.run(`INSERT OR IGNORE INTO asset_tags (asset_id, tag_id, created_at) VALUES ${values}`, params);
         added += r.changes || 0;
       }
+      auth.audit(req.user, 'photo.tag.add', null, { tag: tag.name, added, requested: assetIds.length });
       return res.json({ op, tagId: tag.id, name: tag.name, added, requested: assetIds.length });
     }
 
@@ -903,6 +919,7 @@ router.post('/tags/bulk', requirePerm('photos.tag'), async (req, res) => {
     }
     const left = (await db.get('SELECT COUNT(*) AS c FROM asset_tags WHERE tag_id = ?', [tagId])).c;
     if (left === 0) await db.run('DELETE FROM tags WHERE id = ?', [tagId]);
+    auth.audit(req.user, 'photo.tag.remove', null, { tagId, removed });
     res.json({ op, tagId, removed, remaining: left });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -939,6 +956,7 @@ router.post('/fav/:id', requirePerm('photos.favorite'), async (req, res) => {
     if (!asset) return res.status(404).json({ error: 'Not found' });
     const newFav = asset.fav ? 0 : 1;
     await db.run('UPDATE assets SET fav = ? WHERE id = ?', [newFav, req.params.id]);
+    auth.audit(req.user, newFav ? 'photo.favorite' : 'photo.unfavorite', String(req.params.id));
     res.json({ fav: newFav });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1044,10 +1062,11 @@ router.get('/settings/metrics', requirePerm('settings.view'), async (req, res) =
               SUM(CASE WHEN taken_at IS NULL THEN 1 ELSE 0 END) AS undated,
               SUM(bytes) AS total_bytes,
               MIN(taken_at) AS earliest, MAX(taken_at) AS latest
-       FROM assets WHERE is_live_motion = 0 AND hidden = 0 AND duplicate_of IS NULL`
+       FROM assets WHERE is_live_motion = 0 AND hidden = 0 AND duplicate_of IS NULL AND removed = 0`
     );
-    const hiddenCount = await db.get('SELECT COUNT(*) AS count FROM assets WHERE hidden=1 AND is_live_motion=0');
+    const hiddenCount = await db.get('SELECT COUNT(*) AS count FROM assets WHERE hidden=1 AND is_live_motion=0 AND removed=0');
     const dupCount = await db.get('SELECT COUNT(*) AS count FROM assets WHERE duplicate_of IS NOT NULL');
+    const removedCount = await db.get('SELECT COUNT(*) AS count FROM assets WHERE removed=1 AND is_live_motion=0');
     const live = await db.get('SELECT COUNT(*) AS count FROM assets WHERE is_live_motion = 1');
     const places = await db.get('SELECT COUNT(*) AS count FROM places');
 
@@ -1081,7 +1100,7 @@ router.get('/settings/metrics', requirePerm('settings.view'), async (req, res) =
     );
 
     res.json({
-      library: { ...lib, live_photos: live.count, places: places.count, db_bytes: dbBytes, hidden: hiddenCount.count, duplicates_hidden: dupCount.count },
+      library: { ...lib, live_photos: live.count, places: places.count, db_bytes: dbBytes, hidden: hiddenCount.count, duplicates_hidden: dupCount.count, removed: removedCount.count },
       thumbnails: { count: thumbCount, bytes_approx: thumbBytesApprox, warm: getWarmState() },
       imports: { recent: sessions, total_errors: errAgg.total_errors, interrupted: errAgg.interrupted }
     });
@@ -1161,10 +1180,11 @@ router.post('/warm/config', requirePerm('settings.manage'), async (req, res) => 
 });
 
 // ── Natural-language captions seam (for the networked vision-LLM worker) ──────
-// A small loop on the M4 Mac mini pulls un-captioned photos, asks Ollama for a
-// short factual description, and posts it back. All ML runs on the Mac — this box
-// only stores/searches text. Resumable: the captioned_at cursor is server-side, so
-// the worker holds no state and can stop/restart anytime.
+// A small loop on a separate machine (any box that can run Ollama) pulls
+// un-captioned photos, asks Ollama for a short factual description, and posts it
+// back. All ML runs on that machine — this box only stores/searches text.
+// Resumable: the captioned_at cursor is server-side, so the worker holds no
+// state and can stop/restart anytime.
 
 // GET /api/aurora/captions/pending?limit= — visible photos with no caption yet,
 // each with a light image URL (2048px webp thumb — far smaller than the original).
@@ -1174,7 +1194,7 @@ router.get('/captions/pending', async (req, res) => {
     const rows = await db.all(
       `SELECT a.id FROM assets a
        WHERE a.captioned_at IS NULL AND a.kind='photo' AND a.is_live_motion=0
-         AND a.hidden=0 AND a.duplicate_of IS NULL
+         AND a.hidden=0 AND a.duplicate_of IS NULL AND removed = 0
        ORDER BY a.id LIMIT ?`,
       [limit]
     );
@@ -1237,7 +1257,7 @@ router.post('/captions/ingest', async (req, res) => {
 // GET /api/aurora/captions/status → live runtime state + cumulative counts.
 router.get('/captions/status', async (req, res) => {
   try {
-    const VISIBLE = `kind='photo' AND is_live_motion=0 AND hidden=0 AND duplicate_of IS NULL`;
+    const VISIBLE = `kind='photo' AND is_live_motion=0 AND hidden=0 AND duplicate_of IS NULL AND removed = 0`;
     const total = (await db.get(`SELECT COUNT(*) AS c FROM assets WHERE ${VISIBLE}`)).c;
     const captioned = (await db.get(`SELECT COUNT(*) AS c FROM assets WHERE captioned_at IS NOT NULL AND ${VISIBLE}`)).c;
     const s = captioner.getCaptionState();
@@ -1305,6 +1325,7 @@ router.post('/import', requirePerm('settings.manage'), async (req, res) => {
 
   const sessionId = Date.now();
   startImport(sourcePath, sessionId, { force: !!force });
+  auth.audit(req.user, force ? 'import.reindex' : 'import.start', sourcePath);
   res.json({ sessionId });
 });
 
@@ -1351,11 +1372,11 @@ router.get('/import/progress/:sessionId/stream', (req, res) => {
 router.get('/albums', async (req, res) => {
   try {
     // Smart albums (saved queries). Live Photo clips are excluded everywhere.
-    const BASE_COND = 'is_live_motion=0 AND hidden=0 AND duplicate_of IS NULL';
+    const BASE_COND = 'is_live_motion=0 AND hidden=0 AND duplicate_of IS NULL AND removed = 0';
     const favorites = await db.get(`SELECT COUNT(*) AS count FROM assets WHERE fav=1 AND ${BASE_COND}`);
     const videos = await db.get(`SELECT COUNT(*) AS count FROM assets WHERE kind="video" AND ${BASE_COND}`);
     const recent = await db.get(`SELECT COUNT(*) AS count FROM assets WHERE ${BASE_COND} AND taken_at > ?`, [Date.now() - 30 * 24 * 3600 * 1000]);
-    const hidden = await db.get('SELECT COUNT(*) AS count FROM assets WHERE hidden=1 AND is_live_motion=0');
+    const hidden = await db.get('SELECT COUNT(*) AS count FROM assets WHERE hidden=1 AND is_live_motion=0 AND removed=0');
 
     // Auto-events: group by year/month
     const events = await db.all(
@@ -1385,13 +1406,13 @@ router.get('/albums', async (req, res) => {
     const user = await db.all(
       `SELECT al.id, al.name, al.share_token, al.created_at, al.updated_at,
               (SELECT COUNT(*) FROM album_assets aa JOIN assets a ON a.id = aa.asset_id
-                WHERE aa.album_id = al.id AND a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL) AS count,
+                WHERE aa.album_id = al.id AND a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL AND removed = 0) AS count,
               COALESCE(
                 (SELECT a.id FROM album_assets aa JOIN assets a ON a.id = aa.asset_id
                   WHERE aa.album_id = al.id AND a.id = al.cover_asset_id
-                    AND a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL),
+                    AND a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL AND removed = 0),
                 (SELECT aa.asset_id FROM album_assets aa JOIN assets a ON a.id = aa.asset_id
-                  WHERE aa.album_id = al.id AND a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL
+                  WHERE aa.album_id = al.id AND a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL AND removed = 0
                   ORDER BY aa.created_at DESC, aa.asset_id DESC
                   LIMIT 1)
               ) AS cover_id
@@ -1414,13 +1435,13 @@ router.get('/memories', async (req, res) => {
     const md = String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
     const rows = await db.all(
       `SELECT a.id, a.path, a.kind, a.taken_at, a.width, a.height, a.duration_s,
-              a.gps_lat, a.gps_lon, a.fav, a.camera, a.live_video_id,
+              a.gps_lat, a.gps_lon, a.fav, a.camera, a.live_video_id, a.rotation,
               p.name AS place_name, p.country AS place_country,
               CAST(strftime('%Y', datetime(a.taken_at/1000,'unixepoch')) AS INTEGER) AS y
          FROM assets a LEFT JOIN places p ON a.place_id = p.id
         WHERE a.taken_at IS NOT NULL
           AND strftime('%m-%d', datetime(a.taken_at/1000,'unixepoch')) = ?
-          AND a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL
+          AND a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL AND removed = 0
         ORDER BY a.taken_at ASC`,
       [md]
     );
@@ -1441,7 +1462,7 @@ router.get('/memories', async (req, res) => {
 // ── User albums ──────────────────────────────────────────────────────────────
 // Viewing albums needs only a session (like the rest of the library); creating,
 // editing, and publishing share links needs albums.manage.
-const ALBUM_VISIBLE = 'a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL';
+const ALBUM_VISIBLE = 'a.is_live_motion=0 AND a.hidden=0 AND a.duplicate_of IS NULL AND removed = 0';
 
 async function getAlbum(id) {
   return db.get('SELECT id, name, cover_asset_id, share_token, created_at, updated_at FROM albums WHERE id = ?', [id]);
@@ -1457,6 +1478,7 @@ router.post('/albums', requirePerm('albums.manage'), async (req, res) => {
       'INSERT INTO albums (name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?)',
       [name, req.user ? req.user.id : null, now, now]
     );
+    auth.audit(req.user, 'album.create', String(r.lastID), { name });
     res.json({ id: r.lastID, name });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1490,6 +1512,7 @@ router.post('/albums/:id/delete', requirePerm('albums.manage'), async (req, res)
     if (!album) return res.status(404).json({ error: 'Album not found' });
     await db.run('DELETE FROM album_assets WHERE album_id = ?', [album.id]);
     await db.run('DELETE FROM albums WHERE id = ?', [album.id]);
+    auth.audit(req.user, 'album.delete', String(album.id), { name: album.name });
     res.json({ deleted: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1527,7 +1550,7 @@ router.get('/albums/:id/assets', async (req, res) => {
     if (!album) return res.status(404).json({ error: 'Album not found' });
     const assets = await db.all(
       `SELECT a.id, a.path, a.kind, a.taken_at, a.width, a.height, a.duration_s,
-              a.gps_lat, a.gps_lon, a.fav, a.camera, a.live_video_id,
+              a.gps_lat, a.gps_lon, a.fav, a.camera, a.live_video_id, a.rotation,
               p.name AS place_name, p.country AS place_country
        FROM album_assets aa
        JOIN assets a ON a.id = aa.asset_id
@@ -1861,7 +1884,61 @@ router.post('/assets/privacy', requirePerm('photos.hidden'), async (req, res) =>
       const qs = chunk.map(() => '?').join(',');
       await db.run(`UPDATE assets SET hidden = ? WHERE id IN (${qs})`, [hidden, ...chunk]);
     }
+    auth.audit(req.user, hidden ? 'photo.hide' : 'photo.unhide', assetIds.length === 1 ? String(assetIds[0]) : null, { count: assetIds.length });
     res.json({ ok: true, hidden, count: assetIds.length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Soft-remove (take an asset out of the library, keep the file + DB row) ────
+// removed=1 hides an asset from every view (grid, search, map, albums, stats)
+// but leaves the row — and therefore its path — in place, so the next import
+// scan matches it and skips re-importing. Tags/favorites are preserved, so a
+// mistaken removal is fully undoable from Settings → Manage removed. The
+// ORIGINAL file on disk is never touched. Guarded by photos.delete (same
+// permission that resolves duplicates).
+
+// POST /api/aurora/assets/remove  { assetIds }
+router.post('/assets/remove', requirePerm('photos.delete'), async (req, res) => {
+  try {
+    const assetIds = ((req.body && req.body.assetIds) || []).map(n => parseInt(n)).filter(Number.isFinite);
+    if (!assetIds.length) return res.status(400).json({ error: 'assetIds required' });
+    const now = Date.now();
+    for (let i = 0; i < assetIds.length; i += 500) {
+      const chunk = assetIds.slice(i, i + 500);
+      const qs = chunk.map(() => '?').join(',');
+      await db.run(`UPDATE assets SET removed = 1, removed_at = ? WHERE id IN (${qs})`, [now, ...chunk]);
+    }
+    auth.audit(req.user, 'photo.remove', assetIds.length === 1 ? String(assetIds[0]) : null, { count: assetIds.length });
+    res.json({ ok: true, count: assetIds.length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/aurora/assets/restore  { assetIds }  — undo a soft-remove
+router.post('/assets/restore', requirePerm('photos.delete'), async (req, res) => {
+  try {
+    const assetIds = ((req.body && req.body.assetIds) || []).map(n => parseInt(n)).filter(Number.isFinite);
+    if (!assetIds.length) return res.status(400).json({ error: 'assetIds required' });
+    for (let i = 0; i < assetIds.length; i += 500) {
+      const chunk = assetIds.slice(i, i + 500);
+      const qs = chunk.map(() => '?').join(',');
+      await db.run(`UPDATE assets SET removed = 0, removed_at = NULL WHERE id IN (${qs})`, chunk);
+    }
+    auth.audit(req.user, 'photo.restore', assetIds.length === 1 ? String(assetIds[0]) : null, { count: assetIds.length });
+    res.json({ ok: true, count: assetIds.length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/aurora/assets/removed — list soft-removed assets (path + name only)
+// for the "Manage removed" panel so an accidental removal can be undone.
+router.get('/assets/removed', requirePerm('photos.delete'), async (req, res) => {
+  try {
+    const rows = await db.all(
+      `SELECT id, path, kind, removed_at FROM assets
+       WHERE removed = 1 AND is_live_motion = 0
+       ORDER BY removed_at DESC, id DESC LIMIT 2000`
+    );
+    for (const r of rows) r.filename = r.path ? r.path.split('/').pop() : null;
+    res.json({ removed: rows, count: rows.length });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1887,7 +1964,7 @@ router.post('/settings/passcode/set', requirePerm('photos.hidden'), async (req, 
 // GET /api/aurora/settings/privacy/stats
 router.get('/settings/privacy/stats', requirePerm('photos.hidden'), async (req, res) => {
   try {
-    const h = await db.get('SELECT COUNT(*) AS count FROM assets WHERE hidden = 1 AND is_live_motion = 0');
+    const h = await db.get('SELECT COUNT(*) AS count FROM assets WHERE hidden = 1 AND is_live_motion = 0 AND removed = 0');
     const d = await db.get('SELECT COUNT(*) AS count FROM assets WHERE duplicate_of IS NOT NULL');
     res.json({ hidden: h.count, duplicates_hidden: d.count });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1949,7 +2026,7 @@ router.get('/settings/duplicates', requirePerm('settings.view'), async (req, res
   try {
     const groups = await db.all(
       `SELECT file_hash, COUNT(*) AS count FROM assets
-       WHERE file_hash IS NOT NULL AND is_live_motion = 0 AND duplicate_of IS NULL
+       WHERE file_hash IS NOT NULL AND is_live_motion = 0 AND duplicate_of IS NULL AND removed = 0
        GROUP BY file_hash HAVING count > 1
        ORDER BY count DESC LIMIT 100`
     );
@@ -1957,7 +2034,7 @@ router.get('/settings/duplicates', requirePerm('settings.view'), async (req, res
     for (const g of groups) {
       const assets = await db.all(
         `SELECT a.id, a.path, a.taken_at, a.bytes, a.width, a.height, a.camera, a.live_video_id
-         FROM assets a WHERE a.file_hash = ? AND a.duplicate_of IS NULL AND a.is_live_motion = 0
+         FROM assets a WHERE a.file_hash = ? AND a.duplicate_of IS NULL AND removed = 0 AND a.is_live_motion = 0
          ORDER BY CASE WHEN a.live_video_id IS NOT NULL THEN 1 ELSE 0 END DESC,
                   COALESCE(a.bytes,0) DESC, a.id ASC`, [g.file_hash]
       );
@@ -1987,13 +2064,13 @@ router.post('/settings/duplicates/resolve-all', requirePerm('photos.delete'), as
   try {
     const groups = await db.all(
       `SELECT file_hash FROM assets
-       WHERE file_hash IS NOT NULL AND is_live_motion = 0 AND duplicate_of IS NULL
+       WHERE file_hash IS NOT NULL AND is_live_motion = 0 AND duplicate_of IS NULL AND removed = 0
        GROUP BY file_hash HAVING COUNT(*) > 1`
     );
     let resolved = 0, removed = 0;
     for (const g of groups) {
       const assets = await db.all(
-        `SELECT id, bytes, live_video_id FROM assets WHERE file_hash = ? AND duplicate_of IS NULL AND is_live_motion = 0
+        `SELECT id, bytes, live_video_id FROM assets WHERE file_hash = ? AND duplicate_of IS NULL AND removed = 0 AND is_live_motion = 0
          ORDER BY CASE WHEN live_video_id IS NOT NULL THEN 1 ELSE 0 END DESC,
                   COALESCE(bytes,0) DESC, id ASC`, [g.file_hash]
       );
@@ -2046,7 +2123,7 @@ async function resolveMetadataDuplicates() {
   const rows = await db.all(
     `SELECT id, path, taken_at, camera, width, height, bytes, live_video_id
      FROM assets
-     WHERE is_live_motion = 0 AND hidden = 0 AND duplicate_of IS NULL
+     WHERE is_live_motion = 0 AND hidden = 0 AND duplicate_of IS NULL AND removed = 0
        AND taken_at IS NOT NULL AND camera IS NOT NULL`
   );
   const groups = new Map();

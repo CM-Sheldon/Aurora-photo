@@ -90,6 +90,18 @@ async function getOrCreatePlace(lat, lon) {
   return found ? found.id : null;
 }
 
+// exiftool reports video rotation as a number (0/90/180/270) or occasionally a
+// string like "90" / "Rotate 90 CW". Normalise to one of the four right angles;
+// anything unparseable becomes 0 so we never emit a bogus transform.
+function normalizeRotation(raw) {
+  if (raw == null) return 0;
+  const m = String(raw).match(/-?\d+/);
+  if (!m) return 0;
+  let deg = parseInt(m[0], 10) % 360;
+  if (deg < 0) deg += 360;
+  return (deg === 90 || deg === 180 || deg === 270) ? deg : 0;
+}
+
 function videoMimeType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const map = { '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime',
@@ -219,7 +231,7 @@ async function indexFile(filePath, opts = {}) {
   if (existing && existing.mtime === mtime && !opts.force) return 'skip';
 
   let takenAt = null, lat = null, lon = null, camera = null, lens = null;
-  let width = null, height = null, durationS = null;
+  let width = null, height = null, durationS = null, rotation = 0;
 
   try {
     const tags = await exiftool.read(filePath);
@@ -232,6 +244,10 @@ async function indexFile(filePath, opts = {}) {
     height = tags.ImageHeight || tags.ExifImageHeight || null;
     durationS = tags.Duration ? parseFloat(tags.Duration) : null;
     if (isNaN(durationS)) durationS = null;
+    // Video container rotation (0/90/180/270). Only videos carry a rotation
+    // matrix; the lightbox uses it to fix Android's un-rotated decode. Photos
+    // are pre-rotated when their thumbnails are baked, so leave them at 0.
+    rotation = normalizeRotation(kind === 'video' ? tags.Rotation : 0);
   } catch (_) {
     // Unreadable EXIF — still index with filesystem metadata
   }
@@ -242,18 +258,18 @@ async function indexFile(filePath, opts = {}) {
   if (existing) {
     await db.run(
       `UPDATE assets SET content_hash=?, kind=?, bytes=?, width=?, height=?, duration_s=?,
-       taken_at=?, gps_lat=?, gps_lon=?, place_id=?, camera=?, lens=?, mtime=?, indexed_at=?
+       taken_at=?, gps_lat=?, gps_lon=?, place_id=?, camera=?, lens=?, rotation=?, mtime=?, indexed_at=?
        WHERE id=?`,
       [hash, kind, stat.size, width, height, durationS, takenAt, lat, lon, placeId,
-       camera, lens, mtime, Date.now(), existing.id]
+       camera, lens, rotation, mtime, Date.now(), existing.id]
     );
   } else {
     await db.run(
       `INSERT INTO assets (path, content_hash, kind, bytes, width, height, duration_s,
-       taken_at, gps_lat, gps_lon, place_id, camera, lens, mtime, indexed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       taken_at, gps_lat, gps_lon, place_id, camera, lens, rotation, mtime, indexed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [filePath, hash, kind, stat.size, width, height, durationS, takenAt, lat, lon,
-       placeId, camera, lens, mtime, Date.now()]
+       placeId, camera, lens, rotation, mtime, Date.now()]
     );
   }
 
@@ -610,6 +626,6 @@ module.exports = {
   startThumbnailWarming, stopThumbnailWarming, getWarmState, linkLivePhotos,
   isIndexing, setWarmingCompleteHook,
   // Exported for unit tests
-  extractTakenAt, parseExifDate, dateFromFilename,
+  extractTakenAt, parseExifDate, dateFromFilename, normalizeRotation,
   THUMB_DIR, INDEX_CONCURRENCY, THUMB_CONCURRENCY
 };

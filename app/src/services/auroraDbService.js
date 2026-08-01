@@ -116,9 +116,26 @@ function initSchema() {
       addColumn(`ALTER TABLE assets ADD COLUMN file_hash TEXT`);
       addColumn(`ALTER TABLE assets ADD COLUMN duplicate_of INTEGER`);
 
+      // ── Soft-remove ──────────────────────────────────────────────────────
+      // removed=1 takes an asset out of the whole library (grid, search, map,
+      // albums, stats) WITHOUT deleting the DB row. Keeping the row is what
+      // stops the indexer re-importing the same file on the next scan (it
+      // matches by path + mtime and skips), and it preserves any tags/favorites
+      // so an accidental removal is fully reversible from Settings → Manage
+      // removed. The original file on disk is never touched.
+      addColumn(`ALTER TABLE assets ADD COLUMN removed INTEGER DEFAULT 0`);
+      addColumn(`ALTER TABLE assets ADD COLUMN removed_at INTEGER`);
+
+      // ── Video display rotation ───────────────────────────────────────────
+      // Degrees (0/90/180/270) from the container's rotation matrix. iOS players
+      // apply it automatically; some Android browsers decode the raw (un-rotated)
+      // frame, so the lightbox uses this to correct orientation client-side.
+      addColumn(`ALTER TABLE assets ADD COLUMN rotation INTEGER DEFAULT 0`);
+
       d.run(`CREATE INDEX IF NOT EXISTS idx_assets_hidden ON assets(hidden)`);
       d.run(`CREATE INDEX IF NOT EXISTS idx_assets_dup ON assets(duplicate_of)`);
       d.run(`CREATE INDEX IF NOT EXISTS idx_assets_hash ON assets(file_hash)`);
+      d.run(`CREATE INDEX IF NOT EXISTS idx_assets_removed ON assets(removed)`);
 
       // ── One-shot cleanup: drop the old "Detected content" feature ───────
       // The COCO-SSD object-label store used to live here. AI captions
@@ -228,6 +245,11 @@ function initSchema() {
       // the forced change-PIN screen. Additive migration — no default users
       // are affected retroactively.
       addColumn(`ALTER TABLE users ADD COLUMN must_change_pin INTEGER DEFAULT 0`);
+      // Per-account display prefs: avatar is an emoji/glyph shown in the user
+      // chip; theme is one of 'purple' (default) | 'light' | 'dark'. Both are
+      // additive and follow the account across devices (returned by /me).
+      addColumn(`ALTER TABLE users ADD COLUMN avatar TEXT`);
+      addColumn(`ALTER TABLE users ADD COLUMN theme TEXT`);
       d.run(`CREATE TABLE IF NOT EXISTS audit_log (
         id INTEGER PRIMARY KEY,
         ts INTEGER NOT NULL,

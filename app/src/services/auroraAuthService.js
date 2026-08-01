@@ -123,7 +123,7 @@ async function createUser({ username, pin, roleName, mustChangePin = true }) {
 async function getUserById(id) {
   return db.get(`
     SELECT u.id, u.username, u.disabled, u.created_at, u.last_seen_at,
-           u.locked_until, u.failed_attempts, u.must_change_pin,
+           u.locked_until, u.failed_attempts, u.must_change_pin, u.avatar, u.theme,
            r.id AS role_id, r.name AS role_name, r.permissions
     FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?`, [id]);
 }
@@ -137,7 +137,7 @@ async function getUserByName(name) {
 async function listUsers() {
   return db.all(`
     SELECT u.id, u.username, u.disabled, u.created_at, u.last_seen_at, u.locked_until,
-           u.must_change_pin, r.name AS role_name
+           u.must_change_pin, u.avatar, r.name AS role_name
     FROM users u JOIN roles r ON r.id = u.role_id
     ORDER BY u.username COLLATE NOCASE`);
 }
@@ -202,6 +202,50 @@ async function deleteUser(userId) {
   await db.run(`DELETE FROM users WHERE id = ?`, [userId]);
 }
 
+// ── Display prefs (avatar + theme) ─────────────────────────────────────────
+const THEMES = ['purple', 'light', 'dark'];
+function validateTheme(t) {
+  const s = String(t || '').trim().toLowerCase();
+  if (!THEMES.includes(s)) throw new Error('Unknown theme');
+  return s;
+}
+// An avatar is a short glyph/emoji shown in the user chip. Kept tiny and free of
+// markup; an empty string clears it (falls back to the default person glyph).
+function validateAvatar(a) {
+  const s = String(a == null ? '' : a).replace(/[<>]/g, '').trim();
+  if ([...s].length > 4) throw new Error('Avatar must be a single icon');
+  return s;
+}
+
+// Admin: rename a user and/or set their avatar. Username uniqueness + charset are
+// enforced by validateUsername; a clash surfaces as a friendly error.
+async function updateUserProfile(userId, { username, avatar }) {
+  const u = await db.get(`SELECT id FROM users WHERE id = ?`, [userId]);
+  if (!u) throw new Error('User not found');
+  const sets = [], params = [];
+  if (username !== undefined) {
+    const name = validateUsername(username);
+    const clash = await db.get(`SELECT id FROM users WHERE username = ? AND id != ?`, [name, userId]);
+    if (clash) throw new Error('That username is taken');
+    sets.push('username = ?'); params.push(name);
+  }
+  if (avatar !== undefined) { sets.push('avatar = ?'); params.push(validateAvatar(avatar)); }
+  if (!sets.length) return;
+  params.push(userId);
+  await db.run(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, params);
+}
+
+// Self-service: a signed-in user sets their own theme / avatar. No permission
+// needed — it only affects their own account's display.
+async function setOwnPrefs(userId, { theme, avatar }) {
+  const sets = [], params = [];
+  if (theme !== undefined)  { sets.push('theme = ?');  params.push(validateTheme(theme)); }
+  if (avatar !== undefined) { sets.push('avatar = ?'); params.push(validateAvatar(avatar)); }
+  if (!sets.length) return;
+  params.push(userId);
+  await db.run(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, params);
+}
+
 // ── Role CRUD ─────────────────────────────────────────────────────────────
 function validateRoleName(name) {
   const s = String(name || '').trim();
@@ -264,7 +308,7 @@ async function getSession(token) {
   if (!token) return null;
   const row = await db.get(`
     SELECT s.token, s.user_id, s.expires_at,
-           u.username, u.disabled, u.must_change_pin,
+           u.username, u.disabled, u.must_change_pin, u.avatar, u.theme,
            r.name AS role_name, r.permissions
     FROM sessions s
     JOIN users u ON u.id = s.user_id
@@ -282,6 +326,8 @@ async function getSession(token) {
     role: row.role_name,
     permissions: JSON.parse(row.permissions || '[]'),
     mustChangePin: !!row.must_change_pin,
+    avatar: row.avatar || '',
+    theme: row.theme || 'purple',
   };
 }
 async function touchSession(token) {
@@ -341,12 +387,15 @@ async function audit(reqOrUser, action, target, details) {
       [Date.now(), uid, name, action, target == null ? null : String(target), det]);
   } catch (e) { /* audit failures must never break a request */ }
 }
-async function listAudit({ limit = 100, offset = 0, action, userId } = {}) {
+async function listAudit({ limit = 100, offset = 0, action, category, userId } = {}) {
   const where = [], params = [];
   if (action) { where.push('action = ?'); params.push(action); }
+  // category filters a whole family by the action prefix, e.g. 'photo' matches
+  // photo.favorite / photo.tag.add / photo.remove; 'auth' matches auth.login etc.
+  if (category) { where.push('(action = ? OR action LIKE ?)'); params.push(category, category + '.%'); }
   if (userId) { where.push('user_id = ?'); params.push(userId); }
   const w = where.length ? 'WHERE ' + where.join(' AND ') : '';
-  params.push(Math.min(500, Math.max(1, limit)), Math.max(0, offset));
+  params.push(Math.min(1000, Math.max(1, limit)), Math.max(0, offset));
   return db.all(`SELECT id, ts, user_id, username, action, target, details
     FROM audit_log ${w} ORDER BY ts DESC LIMIT ? OFFSET ?`, params);
 }
@@ -356,6 +405,7 @@ module.exports = {
   SESSION_COOKIE, SESSION_TTL_MS,
   ensureBuiltinRoles, needsSetup, countAdmins,
   createUser, getUserById, listUsers, setUserRole, setUserDisabled, resetUserPin, changeOwnPin, deleteUser,
+  updateUserProfile, setOwnPrefs, THEMES,
   listRoles, createRole, updateRole, deleteRole,
   createSession, getSession, touchSession, deleteSession, deleteSessionsForUser, pruneExpiredSessions,
   verifyPin, audit, listAudit,

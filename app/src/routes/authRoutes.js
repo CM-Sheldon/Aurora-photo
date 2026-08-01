@@ -96,12 +96,25 @@ router.post('/logout', async (req, res) => {
 // ── Signed-in identity + permission catalog (used by the SPA) ─────────────
 router.get('/me', requireAuth, (req, res) => {
   res.json({
+    userId: req.user.userId,
     username: req.user.username,
     role: req.user.role,
     permissions: req.user.permissions,
     mustChangePin: !!req.user.mustChangePin,
+    avatar: req.user.avatar || '',
+    theme: req.user.theme || 'purple',
     permissionCatalog: auth.PERMISSIONS,
   });
+});
+
+// Self-service display prefs (theme + avatar) — affect only the caller's own
+// account, so no permission gate beyond being signed in.
+router.post('/prefs', requireAuth, async (req, res) => {
+  try {
+    const { theme, avatar } = req.body || {};
+    await auth.setOwnPrefs(req.user.userId, { theme, avatar });
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // ── Admin: users ──────────────────────────────────────────────────────────
@@ -115,6 +128,18 @@ router.post('/admin/users', requireAuth, requirePerm('users.manage'), async (req
     const id = await auth.createUser({ username, pin, roleName: role || auth.USER_ROLE.name });
     await auth.audit(req.user, 'user.create', String(id), { username, role });
     res.json({ ok: true, id });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Admin: rename a user and/or set their avatar icon.
+router.post('/admin/users/:id/profile', requireAuth, requirePerm('users.manage'), async (req, res) => {
+  try {
+    const body = req.body || {};
+    const patch = {};
+    if (body.username !== undefined) patch.username = body.username;
+    if (body.avatar !== undefined) patch.avatar = body.avatar;
+    await auth.updateUserProfile(+req.params.id, patch);
+    await auth.audit(req.user, 'user.profile', req.params.id, patch);
+    res.json({ ok: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 router.post('/admin/users/:id/role', requireAuth, requirePerm('users.manage'), async (req, res) => {
@@ -181,6 +206,7 @@ router.get('/admin/audit', requireAuth, requirePerm('audit.view'), async (req, r
       limit: +req.query.limit || 200,
       offset: +req.query.offset || 0,
       action: req.query.action || undefined,
+      category: req.query.category || undefined,
       userId: req.query.userId ? +req.query.userId : undefined,
     });
     res.json({ entries: rows });

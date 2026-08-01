@@ -39,7 +39,7 @@ async function appendCaptionSidecar(record) {
 // Only the visible photo library; clips/duplicates/hidden are excluded (and stay
 // pending, so an un-hidden/un-duplicated photo gets picked up later). Mirrors the
 // vision service's PENDING_WHERE but on the captioned_at cursor.
-const VISIBLE = "kind='photo' AND is_live_motion=0 AND hidden=0 AND duplicate_of IS NULL";
+const VISIBLE = "kind='photo' AND is_live_motion=0 AND hidden=0 AND duplicate_of IS NULL AND removed = 0";
 const PENDING_WHERE = `captioned_at IS NULL AND ${VISIBLE}`;
 
 const OLLAMA_TIMEOUT_MS = parseInt(process.env.AURORA_CAPTION_TIMEOUT_MS) || 120000;
