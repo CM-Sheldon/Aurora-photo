@@ -165,14 +165,17 @@ function animateOpen(rect) {
   });
 }
 
-function closeLightbox() {
+// closeLightbox(true) skips the zoom back into the tile — used when the
+// viewer hands off to another screen or the item just left the grid.
+function closeLightbox(instant) {
   if (!viewerOpen() || lb.classList.contains('closing')) return;
+  instant = instant === true;              // ignore event objects from listeners
   closeMetaPanel(true);
   stopLive();
   lbVid.pause();
   const g = state.lightboxGrid, idx = state.lightboxIdx;
   let rect = null;
-  if (g && g.isShown()) { g.ensureVisible(idx); rect = g.tileRect(idx); }
+  if (!instant && g && g.isShown()) { g.ensureVisible(idx); rect = g.tileRect(idx); }
   const finish = () => {
     lb.classList.remove('open', 'closing', 'fill', 'chrome-hidden', 'is-video', 'dragging', 'info-open', 'zoomed');
     lb.setAttribute('aria-hidden', 'true');
@@ -186,6 +189,7 @@ function closeLightbox() {
     requestAnimationFrame(() => lbStage.classList.remove('no-anim'));
     if (g) { const t = g.tileEl(idx); if (t && rect) { t.classList.remove('flash'); void t.offsetWidth; t.classList.add('flash'); } }
   };
+  if (instant) { finish(); return; }
   lb.classList.add('closing');
   if (rect && !reducedMotion()) {
     const W = window.innerWidth, H = window.innerHeight;
@@ -696,7 +700,7 @@ function renderInfo(a) {
   const map = $('infoMap');
   if (map) {
     renderMiniMap(map, a.gps_lat, a.gps_lon);
-    map.addEventListener('click', () => { closeLightbox(); openPlacesAt(a.gps_lat, a.gps_lon, a.place_id); });
+    map.addEventListener('click', () => { closeLightbox(true); openPlacesAt(a.gps_lat, a.gps_lon, a.place_id); });
   }
   const priv = $('metaPrivBtn');
   if (priv) priv.addEventListener('click', () => {
@@ -737,7 +741,7 @@ function renderMetaTags(tags) {
     + (!tags.length && !canTag ? '<span class="group-foot" style="padding:0">No tags</span>' : '');
   el.querySelectorAll('[data-tag]').forEach((chip) => {
     const id = +chip.dataset.tag, name = chip.querySelector('.tag-name').textContent;
-    chip.querySelector('.tag-name').addEventListener('click', () => { closeLightbox(); openTagDetail({ id, name }); });
+    chip.querySelector('.tag-name').addEventListener('click', () => { closeLightbox(true); openTagDetail({ id, name }); });
     const x = chip.querySelector('.tag-x');
     if (x) x.addEventListener('click', (e) => { e.stopPropagation(); metaRemoveTag(id); });
   });

@@ -94,12 +94,15 @@ function updateLibSubtitle(force) {
   const n = state.filtered.length;
   let label = '';
   if (n && libView === 'all' && libGrid.cellW) {
-    const idx = libGrid.indexAtContentY(libScroll.scrollTop + libGrid.padTop + libGrid.cellW * 0.4);
-    const it = state.filtered[idx];
-    label = it ? (it.taken_at ? fmtMon(it.taken_at) : 'Undated') : '';
+    // The row just under the title — or under the date pill once the title is hidden.
+    const y = libChrome.min ? 60 : libGrid.padTop + libGrid.cellW * 0.4;
+    const it = state.filtered[libGrid.indexAtContentY(libScroll.scrollTop + y)];
+    label = it ? (it.taken_at ? fmtMon(it.taken_at) : 'No date') : '';
   }
   const text = n ? (label ? `${label} · ${plural(n, 'item')}` : plural(n, 'item')) : (state.assetsLoaded ? 'No items' : ' ');
   if (force || text !== _subKey) { _subKey = text; sub.textContent = text; }
+  const pill = $('libDatePill');
+  if (pill.textContent !== label) pill.textContent = label;
 }
 
 // ── Filters: view menu + pills ────────────────────────────────────────────

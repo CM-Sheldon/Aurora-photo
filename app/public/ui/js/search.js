@@ -324,26 +324,6 @@ function openSearchRange() {
   });
 }
 
-// ── Entry points from other screens ───────────────────────────────────────
-function resetSearchFilters() {
-  Object.assign(searchState, { kind: '', camera: '', country: '', fav: false, placeIds: '', placeName: '', tag: '', tagName: '', terms: [], dateFrom: 0, dateTo: 0 });
-  $('searchInput').value = '';
-}
-function searchPlace(ids, name, range) {
-  resetSearchFilters();
-  searchState.placeIds = String(ids);
-  searchState.placeName = name || 'Selected place';
-  searchState.dateFrom = range && range.from ? range.from : 0;
-  searchState.dateTo = range && range.to ? range.to : 0;
-  switchScreen('search');
-}
-function searchTag(tagId, name) {
-  resetSearchFilters();
-  searchState.tag = String(tagId);
-  searchState.tagName = name || '';
-  switchScreen('search');
-}
-
 // ── Keyboard: keep the bottom dock above the on-screen keyboard (iOS) ─────
 (function () {
   const vv = window.visualViewport;

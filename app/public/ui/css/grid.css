@@ -122,3 +122,17 @@ body.select-mode .zoom-seg { display: none; }
 .zoom-card:active { transform: scale(0.985); transition: transform 0.15s; }
 .img-fade { opacity: 0; transition: opacity 0.35s; }
 .img-fade.in { opacity: 1; }
+
+/* Month pill: keeps your place in time while the title has scrolled away.
+   Solid (no blur) — it sits over the scrolling grid. */
+.date-pill {
+  position: absolute; z-index: 21; left: var(--gutter); top: calc(var(--safe-top) + 10px);
+  height: 32px; padding: 0 13px; border-radius: 16px; display: flex; align-items: center;
+  font-size: 14px; font-weight: 700; color: #fff; white-space: nowrap;
+  background: rgba(28, 27, 33, 0.84); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  opacity: 0; transform: translateY(-6px); pointer-events: none;
+  transition: opacity 0.25s var(--ease-std), transform 0.3s var(--ease-out);
+}
+.date-pill:empty { display: none; }
+#screen-library.chrome-min .date-pill { opacity: 1; transform: none; }
+body.select-mode .date-pill { display: none; }

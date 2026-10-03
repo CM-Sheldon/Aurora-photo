@@ -438,8 +438,8 @@ async function togglePrivatePhoto(id, currentlyHidden) {
     await postJSON('/api/aurora/assets/privacy', { assetIds: [id], hidden: currentlyHidden ? 0 : 1 });
     assetCache.delete(id);
     toast(currentlyHidden ? 'Unhidden' : 'Hidden');
-    if (viewerOpen()) closeLightbox();
-    dropFromViews([id]);
+    if (viewerOpen()) closeLightbox(true);
+    dropFromViews([id], !!currentlyHidden);
   } catch (e) { toast('Couldn’t update: ' + e.message); }
 }
 
@@ -455,7 +455,7 @@ async function removeAssetFromLibrary(id) {
     await postJSON('/api/aurora/assets/remove', { assetIds: [id] });
     assetCache.delete(id);
     toast('Removed from library');
-    if (viewerOpen()) closeLightbox();
+    if (viewerOpen()) closeLightbox(true);
     dropFromViews([id]);
   } catch (e) { toast('Couldn’t remove: ' + e.message); }
 }
@@ -476,8 +476,8 @@ async function restoreIds(ids) {
     ids.forEach(id => assetCache.delete(id));
     toast(ids.length === 1 ? 'Restored to library' : `${plural(ids.length, 'item')} restored`);
     if (state.selectMode) exitSelectMode();
-    if (viewerOpen() && currentDetailKind() === 'removed') closeLightbox();
-    dropFromViews(ids);
+    if (viewerOpen() && currentDetailKind() === 'removed') closeLightbox(true);
+    dropFromViews(ids, true);
   } catch (e) { toast('Couldn’t restore: ' + e.message); }
 }
 function restoreRemoved(id) { restoreIds([id]); }

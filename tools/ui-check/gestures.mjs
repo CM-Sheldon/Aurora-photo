@@ -155,6 +155,7 @@ await wait(200);
 for (let i = 0; i < 4; i++) { await drag({ x: 200, y: 700 }, { x: 200, y: 250 }, 6); await wait(120); }
 await wait(400);
 ok('scrolling down minimises chrome', await ev(() => document.getElementById('screen-library').classList.contains('chrome-min') && document.getElementById('tabbar').classList.contains('min')));
+ok('date pill shows the month while the title is hidden', await ev(() => { const p = document.getElementById('libDatePill'); return getComputedStyle(p).opacity === '1' && /\b\d{4}\b/.test(p.textContent); }), await ev(() => document.getElementById('libDatePill').textContent));
 await shot('g05-scrolled-min');
 for (let i = 0; i < 2; i++) { await drag({ x: 200, y: 250 }, { x: 200, y: 700 }, 6); await wait(120); }
 await wait(400);
@@ -169,6 +170,25 @@ await drag({ x: scrubR.x, y: scrubR.y }, { x: scrubR.x, y: scrubR.y + 300 }, 15)
 await wait(300);
 const yAfter = await ev(() => document.getElementById('libScroll').scrollTop);
 ok('scrubber drag jumps far', yAfter - yBefore > 20000, `scrollTop ${Math.round(yBefore)} → ${Math.round(yAfter)}`);
+// Only the handle is grabbable: a tap on the right-hand column away from it
+// must reach the photo, not jump the grid.
+// Small scroll up that ends with the finger held still, so there's no fling
+// (a tap during a fling only stops it — it never clicks).
+await touch('touchStart', [{ x: 200, y: 480 }]);
+for (let i = 1; i <= 10; i++) { await touch('touchMove', [{ x: 200, y: 480 + i * 22 }]); await wait(16); }
+await wait(250);
+await touch('touchEnd', []);
+await wait(250);
+ok('scrubber: visible after scrolling', await ev(() => document.getElementById('libScrubber').classList.contains('show')));
+const hr = await rectOf('#scrubHandle');
+const yTap0 = await ev(() => document.getElementById('libScroll').scrollTop);
+await tap({ x: 384, y: hr.y > 450 ? hr.y - 260 : hr.y + 260 });
+await wait(700);
+const yTap1 = await ev(() => document.getElementById('libScroll').scrollTop);
+ok('scrubber: tap away from the handle does not jump', Math.abs(yTap1 - yTap0) < 5, `${Math.round(yTap0)} → ${Math.round(yTap1)}`);
+ok('scrubber: that tap opens the photo underneath', await ev(() => document.getElementById('lightbox').classList.contains('open')));
+await ev(() => closeLightbox(true));
+await wait(200);
 
 // ── Search paging ──
 await ev(() => switchScreen('search'));

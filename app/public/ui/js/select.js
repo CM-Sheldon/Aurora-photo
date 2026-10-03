@@ -60,11 +60,19 @@ function selectedItems() {
   const set = state.selected;
   return (state.selectList || []).filter(it => set.has(it.id));
 }
-// After a bulk change that removes items from the current view.
-function dropFromViews(ids) {
+// After items leave the visible library (hidden, removed) — or move between
+// views (unhidden, restored: `libraryGains`, which needs a fresh index).
+// Removals are applied locally so a hide doesn't re-download the whole index.
+function dropFromViews(ids, libraryGains) {
+  const gone = new Set(ids);
   allGrids.forEach(g => { if (g !== libGrid) g.removeIds(ids); });
   loadStats();
-  loadIndex();
+  collectionsDirty = true;
+  placesLoadedAt = 0;
+  if (libraryGains) { loadIndex(); return; }
+  const before = state.assets.length;
+  state.assets = state.assets.filter(a => !gone.has(a.id));
+  if (state.assets.length !== before) applyFilters({ keepScroll: true });
 }
 
 // ── Share / download ──────────────────────────────────────────────────────
@@ -243,7 +251,7 @@ async function selHidePhotos(unhide) {
     await postJSON('/api/aurora/assets/privacy', { assetIds: ids, hidden: unhide ? 0 : 1 });
     toast(unhide ? `${plural(ids.length, 'item')} unhidden` : `${plural(ids.length, 'item')} hidden`);
     exitSelectMode();
-    dropFromViews(ids);
+    dropFromViews(ids, !!unhide);
   } catch (e) { toast('Couldn’t update: ' + e.message); }
 }
 async function selRemovePhotos() {

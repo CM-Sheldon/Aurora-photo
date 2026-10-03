@@ -111,6 +111,43 @@ await a.evaluate(() => clearSearchAll());
 await a.waitForTimeout(800);
 ok('search: clear returns to discovery', await a.evaluate(() => !document.getElementById('searchDiscover').hidden));
 
+// Hide from the select bar: leaves the library at once, no index re-download
+let indexFetches = 0;
+a.on('request', (r) => { if (r.url().includes('/api/aurora/assets/index')) indexFetches++; });
+await a.evaluate(() => switchScreen('library'));
+await a.waitForTimeout(600);
+const hideId = await a.evaluate(() => libGrid.items[5].id);
+await a.evaluate((id) => { enterSelectMode(libGrid); toggleSelect(id); }, hideId);
+await a.evaluate(() => selHidePhotos());
+await a.waitForTimeout(1500);
+ok('hide: item leaves the library at once', await a.evaluate((id) => !libGrid.items.some(i => i.id === id) && !state.assets.some(x => x.id === id), hideId));
+ok('hide: no full index reload', indexFetches === 0, `${indexFetches} index fetches`);
+await a.evaluate((id) => postJSON('/api/aurora/assets/privacy', { assetIds: [id], hidden: 0 }), hideId);
+await a.evaluate(() => loadIndex());
+await a.waitForTimeout(1500);
+ok('hide: unhidden item is back after a reload', await a.evaluate((id) => state.assets.some(x => x.id === id), hideId));
+
+// Info mini-map hands off to Places instantly and opens that place
+const geoIdx = await a.evaluate(async () => {
+  for (let i = 0; i < 80; i++) { const it = libGrid.items[i]; if (it.kind !== 'photo') continue; const d = await getAssetDetails(it.id); if (d.gps_lat != null && d.place_id) return i; }
+  return -1;
+});
+if (geoIdx >= 0) {
+  await a.evaluate((i) => { libGrid.scrollToIndex(i); openLightboxFromGrid(libGrid, i); }, geoIdx);
+  await a.waitForTimeout(600);
+  await a.evaluate(() => openMetaPanel());
+  await a.waitForSelector('#infoMap', { timeout: 8000 });
+  await a.waitForTimeout(400);
+  await a.evaluate(() => document.getElementById('infoMap').click());
+  await a.waitForTimeout(150);
+  ok('info map: viewer closes at once and Places opens', await a.evaluate(() => !document.getElementById('lightbox').classList.contains('open') && state.screen === 'places'));
+  await a.waitForFunction(() => document.getElementById('placeDetail').classList.contains('open'), null, { timeout: 15000 }).catch(() => {});
+  ok('info map: that photo\'s place opens', await a.evaluate(() => document.getElementById('placeDetail').classList.contains('open')));
+  await a.waitForTimeout(1200);
+  await a.screenshot({ path: `${OUT}/f00-info-map-handoff.png` });
+  await a.evaluate(() => { closePlaceSheet(); switchScreen('library'); });
+} else ok('info map: (no geotagged photo in the first 80 — skipped)', true);
+
 // Light theme tour
 await a.evaluate(() => applyTheme('light'));
 for (const [scr, name] of [['library', 'f06-light-library'], ['search', 'f07-light-search'], ['places', 'f08-light-places']]) {

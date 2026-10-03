@@ -240,6 +240,7 @@ class VirtualGrid {
   bindPointer() {
     const el = this.el;
     let lp = null;   // long-press tracker
+    let lastLpAt = 0; // when our long-press menu last opened (Android also fires contextmenu)
     let suppressClick = false;
 
     el.addEventListener('click', (e) => {
@@ -258,6 +259,7 @@ class VirtualGrid {
       const tile = e.target.closest('.tile');
       if (!tile || state.selectMode) return;
       e.preventDefault();
+      if (performance.now() - lastLpAt < 1500) return;   // already open from the long-press
       this.openContextMenu(+tile.dataset.idx, tile);
     });
 
@@ -278,6 +280,7 @@ class VirtualGrid {
         lp = null;
         if (touches.size !== 1) return;
         suppressClick = true;
+        lastLpAt = performance.now();
         if (navigator.vibrate) { try { navigator.vibrate(8); } catch (_) {} }
         this.openContextMenu(idx, tile);
       }, 480) };
