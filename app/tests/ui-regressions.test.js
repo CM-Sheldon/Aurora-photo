@@ -14,7 +14,27 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const AUTH = fs.readFileSync(path.join(__dirname, '..', 'views', 'auth.ejs'), 'utf8');
-const APP  = fs.readFileSync(path.join(__dirname, '..', 'views', 'aurora.ejs'), 'utf8');
+
+// The main app is split across the EJS shell (+ partials) and the static
+// /ui CSS/JS it loads. Concatenate them all so these checks keep working no
+// matter which file a rule or function lives in.
+function readTree(dir, exts) {
+  if (!fs.existsSync(dir)) return '';
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((d) => {
+      const p = path.join(dir, d.name);
+      if (d.isDirectory()) return readTree(p, exts);
+      return exts.some((e) => d.name.endsWith(e)) ? fs.readFileSync(p, 'utf8') + '\n' : '';
+    }).join('');
+}
+const VIEWS = path.join(__dirname, '..', 'views');
+const UI = path.join(__dirname, '..', 'public', 'ui');
+const APP = [
+  fs.readFileSync(path.join(VIEWS, 'aurora.ejs'), 'utf8'),
+  readTree(path.join(VIEWS, 'partials'), ['.ejs']),
+  readTree(UI, ['.css', '.js']),
+].join('\n');
 
 // ── auth.ejs (login page) ──────────────────────────────────────────────────
 
