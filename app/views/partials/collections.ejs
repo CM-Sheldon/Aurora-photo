@@ -1,0 +1,71 @@
+<%#
+  COLLECTIONS (was Albums) — On This Day, pinned smart albums, user albums, tags
+  and Utilities. #screen-detail is the generic "one collection" view (an album, a
+  smart album, a tag, a place, Hidden, Recently removed) pushed on top of it.
+%>
+<section class="screen" id="screen-collections" data-screen-id="collections">
+  <div class="scroller page-scroll" id="collectionsScroll">
+    <header class="screen-head solid">
+      <div class="sh-text"><h1>Collections</h1></div>
+      <div class="sh-actions">
+        <button type="button" class="gbtn round" data-perm="albums.manage" onclick="createAlbumPrompt()" aria-label="New album"><svg class="i"><use href="#i-plus"/></svg></button>
+        <button type="button" class="gbtn round avatar-btn" onclick="openAccountSheet()" aria-label="Account"><span data-avatar-glyph></span></button>
+      </div>
+    </header>
+
+    <section class="coll-section" id="memSection" hidden>
+      <div class="memories" id="memoriesStrip"></div>
+    </section>
+
+    <section class="coll-section">
+      <h2 class="sec-title">Pinned</h2>
+      <div class="hrow" id="pinnedRow"></div>
+    </section>
+
+    <section class="coll-section">
+      <h2 class="sec-title">Albums</h2>
+      <div class="hrow" id="albumsRow"></div>
+    </section>
+
+    <section class="coll-section" id="tagsSection" hidden>
+      <h2 class="sec-title">Tags</h2>
+      <div class="hrow" id="tagsRow"></div>
+    </section>
+
+    <section class="coll-section" id="utilSection" hidden>
+      <h2 class="sec-title">Utilities</h2>
+      <div class="group" id="utilList"></div>
+    </section>
+  </div>
+</section>
+
+<section class="screen pushed" id="screen-detail" data-screen-id="detail" aria-hidden="true">
+  <div class="scroller" id="detailScroll">
+    <div class="vgrid" id="detailGrid"></div>
+    <div class="empty-state" id="detailEmpty" hidden>
+      <div class="empty-art"><svg class="i"><use href="#i-photo"/></svg></div>
+      <h2 id="detailEmptyTitle">Nothing here yet</h2>
+      <p id="detailEmptyText"></p>
+    </div>
+    <div class="loading-state" id="detailLoading" hidden><span class="spinner"></span></div>
+  </div>
+  <div class="top-scrim"></div>
+  <header class="screen-head over detail-head" id="detailHeader">
+    <button type="button" class="gbtn round back-btn" onclick="closeDetail()" aria-label="Back"><svg class="i"><use href="#i-back"/></svg></button>
+    <div class="sh-text">
+      <h1 id="detailTitle"></h1>
+      <p id="detailSub">&nbsp;</p>
+    </div>
+    <div class="sh-actions">
+      <button type="button" class="gbtn" id="detailSelectBtn" onclick="toggleSelectMode()" hidden>Select</button>
+      <button type="button" class="gbtn round" id="detailMoreBtn" onclick="openDetailMenu(this)" aria-label="More" hidden><svg class="i"><use href="#i-more"/></svg></button>
+      <button type="button" class="gbtn accent" id="detailDoneBtn" onclick="toggleAlbumEdit()" hidden>Done</button>
+    </div>
+    <div class="filter-pills" id="albumShareRow" hidden>
+      <span class="pill static"><svg class="i sm"><use href="#i-link"/></svg>Public link is on</span>
+      <button type="button" class="pill" onclick="copyAlbumShare()"><svg class="i sm"><use href="#i-copy"/></svg>Copy link</button>
+      <button type="button" class="pill" onclick="revokeAlbumShare()">Turn off</button>
+      <input id="albumShareUrl" readonly tabindex="-1" aria-hidden="true">
+    </div>
+  </header>
+</section>

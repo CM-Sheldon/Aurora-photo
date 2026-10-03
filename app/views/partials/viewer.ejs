@@ -1,0 +1,45 @@
+<%#
+  VIEWER — always a dark media surface, in every theme. Place + date as the title,
+  Live Photo pill, filmstrip and actions at the bottom (thumb reach). The info sheet
+  rises from the bottom on phones and is a side panel on desktop.
+  Gestures (viewer.js): swipe left/right to page, down to close, up for info,
+  tap to hide chrome, double-tap / pinch to zoom, press-and-hold to play a Live Photo.
+%>
+<div class="viewer" id="lightbox" aria-hidden="true" aria-label="Photo viewer">
+  <div class="viewer-bg" id="viewerBg"></div>
+  <div class="viewer-stage" id="lightboxStage">
+    <img id="lightboxImg" alt="" draggable="false">
+    <video id="lightboxVideo" playsinline preload="metadata"></video>
+  </div>
+
+  <header class="viewer-top">
+    <button type="button" class="gbtn round" onclick="closeLightbox()" aria-label="Close"><svg class="i"><use href="#i-back"/></svg></button>
+    <div class="viewer-title"><b id="lightboxTitle"></b><span id="lightboxSub"></span></div>
+    <button type="button" class="gbtn live-pill" id="lbLiveBtn" onclick="playLive()" hidden><svg class="i"><use href="#i-live"/></svg><span>LIVE</span></button>
+  </header>
+
+  <button type="button" class="viewer-nav prev" id="lbPrev" onclick="lightboxNav(-1)" aria-label="Previous"><svg class="i"><use href="#i-back"/></svg></button>
+  <button type="button" class="viewer-nav next" id="lbNext" onclick="lightboxNav(1)" aria-label="Next"><svg class="i"><use href="#i-chev"/></svg></button>
+
+  <footer class="viewer-bottom">
+    <div class="filmstrip" id="lbFilm"><div class="film-track" id="lbFilmTrack"></div></div>
+    <div class="viewer-toolbar">
+      <button type="button" class="gbtn round lg" id="lbShareBtn" data-perm="photos.download" onclick="lightboxShare()" aria-label="Share"><svg class="i"><use href="#i-share"/></svg></button>
+      <div class="gcap glass">
+        <button type="button" id="lbFavBtn" data-perm="photos.favorite" onclick="lightboxToggleFav()" aria-label="Favourite"><svg class="i"><use href="#i-heart"/></svg></button>
+        <button type="button" id="lbInfoBtn" onclick="toggleMetaPanel()" aria-label="Info"><svg class="i"><use href="#i-info"/></svg></button>
+        <button type="button" id="lbAlbumBtn" data-perm="albums.manage" onclick="lightboxAddToAlbum()" aria-label="Add to album"><svg class="i"><use href="#i-album"/></svg></button>
+      </div>
+      <button type="button" class="gbtn round lg" id="lbMoreBtn" onclick="openLightboxMore(this)" aria-label="More"><svg class="i"><use href="#i-more"/></svg></button>
+    </div>
+  </footer>
+</div>
+
+<aside class="info-sheet" id="metaPanel" aria-label="Photo info">
+  <div class="sheet-grab-area" id="infoGrab"><div class="grab"></div></div>
+  <div class="info-head">
+    <span>Info</span>
+    <button type="button" class="close-btn" onclick="closeMetaPanel()" aria-label="Close info"><svg class="i"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="info-body" id="metaPanelBody"></div>
+</aside>

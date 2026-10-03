@@ -1,0 +1,29 @@
+<%#
+  Phone navigation: a floating glass tab bar (Library · Places · Collections) with
+  Search as its own round button, iOS 26 style. In select mode the same spot shows
+  the selection action bar instead, so nothing ever covers the grid.
+%>
+<nav class="tabbar" id="tabbar" aria-label="Main">
+  <div class="tabbar-main glass" id="tabbarMain">
+    <button type="button" class="tab active" data-screen="library"><svg class="i"><use href="#i-library"/></svg><span>Library</span></button>
+    <button type="button" class="tab" data-screen="places"><svg class="i"><use href="#i-places"/></svg><span>Places</span></button>
+    <button type="button" class="tab" data-screen="collections"><svg class="i"><use href="#i-collections"/></svg><span>Collections</span></button>
+  </div>
+  <button type="button" class="tab-search glass" data-screen="search" aria-label="Search"><svg class="i"><use href="#i-search"/></svg></button>
+</nav>
+
+<!-- Multi-select: top bar (cancel · count · select all) + bottom action bar -->
+<div class="select-top" id="selectTop">
+  <button type="button" class="gbtn round" onclick="exitSelectMode()" aria-label="Cancel selection"><svg class="i"><use href="#i-x"/></svg></button>
+  <div class="select-count" id="selCount">Select items</div>
+  <button type="button" class="gbtn" onclick="selSelectAll()">Select all</button>
+</div>
+<div class="select-bar" id="selectionBar">
+  <div class="select-actions glass">
+    <button type="button" class="sa" id="selShareBtn" data-perm="photos.download" onclick="shareSelection()"><svg class="i"><use href="#i-share"/></svg><span>Share</span></button>
+    <button type="button" class="sa" data-perm="photos.favorite" onclick="selFavourite()"><svg class="i"><use href="#i-heart"/></svg><span>Favourite</span></button>
+    <button type="button" class="sa" data-perm="albums.manage" onclick="selStartAddToAlbum()"><svg class="i"><use href="#i-album"/></svg><span>Album</span></button>
+    <button type="button" class="sa" data-perm="photos.tag" onclick="selStartAddTag()"><svg class="i"><use href="#i-tag"/></svg><span>Tag</span></button>
+    <button type="button" class="sa" id="selMoreBtn" onclick="openSelMoreMenu(this)"><svg class="i"><use href="#i-more"/></svg><span>More</span></button>
+  </div>
+</div>

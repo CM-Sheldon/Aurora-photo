@@ -1,0 +1,124 @@
+/* ════════════════════════════════════════════════════════════════════════
+   Aurora 2 — the one grid (VirtualGrid in grid.js) + Library chrome:
+   tiles, selection, scrubber, Years / Months / All.
+   Tiles are absolutely positioned with explicit width/height (iOS Safari does
+   not reliably honour aspect-ratio on absolute children — see v1.8 notes).
+   ════════════════════════════════════════════════════════════════════════ */
+
+.vgrid { position: relative; width: 100%; }
+.tile {
+  position: absolute; overflow: hidden; cursor: pointer;
+  background: var(--tile-bg);
+  contain: strict;
+  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+}
+.tile img { width: 100%; height: 100%; object-fit: cover; -webkit-user-drag: none; }
+.t-dur {
+  position: absolute; right: 5px; bottom: 4px; z-index: 2;
+  font-size: 12px; font-weight: 600; color: #fff; letter-spacing: 0;
+  font-variant-numeric: tabular-nums; text-shadow: 0 1px 4px rgba(0,0,0,0.75);
+}
+.t-fav { position: absolute; left: 5px; bottom: 5px; z-index: 2; color: #fff; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.65)); }
+.t-fav .i { width: 15px; height: 15px; }
+.t-check {
+  position: absolute; right: 5px; bottom: 5px; z-index: 3; display: none;
+  width: 24px; height: 24px; border-radius: 50%;
+  border: 1.5px solid #fff; background: rgba(0,0,0,0.16);
+  align-items: center; justify-content: center; color: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+.t-check .i { width: 14px; height: 14px; display: none; }
+body.select-mode .t-check { display: flex; }
+body.select-mode .t-dur { right: 34px; }
+.tile.selected::after { content: ""; position: absolute; inset: 0; z-index: 1; background: rgba(255,255,255,0.2); }
+.tile.selected .t-check { background: var(--accent); border-color: #fff; }
+.tile.selected .t-check .i { display: block; }
+body.select-mode .tile { touch-action: pan-y; }   /* sideways drag sweeps a selection; vertical drag still scrolls */
+/* Hover-only quick favourite (mouse); touch uses the viewer / long-press menu. */
+.t-favbtn {
+  position: absolute; top: 5px; right: 5px; z-index: 3; width: 30px; height: 30px; border-radius: 50%;
+  display: none; align-items: center; justify-content: center; color: #fff;
+  background: rgba(0,0,0,0.35);
+}
+.t-favbtn .i { width: 17px; height: 17px; }
+@media (hover: hover) and (pointer: fine) {
+  .tile:hover .t-favbtn { display: flex; }
+  .tile:hover img { filter: brightness(1.06); }
+  body.select-mode .tile:hover .t-favbtn { display: none; }
+}
+.tile-live-preview { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; background: #000; }
+.tile.flash { animation: tileFlash 0.9s var(--ease-std); }
+@keyframes tileFlash { 0% { filter: brightness(1.6); } 100% { filter: none; } }
+
+/* ── Library chrome ────────────────────────────────────────────────────── */
+#screen-library .scroller, #screen-detail .scroller { touch-action: pan-y; }
+
+/* Scrubber: drag to fly through the years. */
+.scrubber {
+  position: absolute; z-index: 18; right: 0; width: 46px;
+  top: calc(var(--safe-top) + 112px);
+  bottom: calc(var(--tab-gap) + var(--tab-h) + 70px);
+  opacity: 0; transition: opacity 0.35s var(--ease-std);
+  touch-action: none; pointer-events: none;
+}
+.scrubber.show, .scrubber.dragging { opacity: 1; }
+/* Only the handle is grabbable (with a finger-sized hit area), so tapping a
+   photo in the right-hand column just after scrolling never jumps the grid. */
+.scrubber.show .scrub-handle, .scrubber.dragging .scrub-handle { pointer-events: auto; }
+.scrub-handle::before { content: ""; position: absolute; top: -14px; bottom: -14px; left: -26px; right: -6px; }
+.scrub-track { position: absolute; right: 7px; top: 0; bottom: 0; width: 3px; border-radius: 2px; background: rgba(255,255,255,0.22); }
+.scrub-handle {
+  position: absolute; right: 3px; top: 0; width: 11px; height: 44px; border-radius: 6px;
+  background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.45); will-change: transform;
+}
+.scrubber.dragging .scrub-handle { background: var(--accent); }
+.scrub-label {
+  position: absolute; right: 20px; top: 50%; transform: translateY(-50%);
+  height: 32px; padding: 0 13px; border-radius: 16px; display: none; align-items: center;
+  font-size: 14px; font-weight: 700; white-space: nowrap; color: #fff;
+  background: rgba(30, 29, 36, 0.92); box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+}
+.scrubber.dragging .scrub-label { display: flex; }
+.scrub-years { position: absolute; right: 22px; top: 0; bottom: 0; width: 60px; pointer-events: none; display: none; }
+.scrubber.dragging .scrub-years { display: block; }
+.scrub-year {
+  position: absolute; right: 0; transform: translateY(-50%);
+  font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.85); text-shadow: 0 1px 6px rgba(0,0,0,0.8);
+  font-variant-numeric: tabular-nums;
+}
+.scrub-year::after { content: ""; display: inline-block; width: 6px; height: 2px; margin-left: 4px; vertical-align: middle; background: rgba(255,255,255,0.6); border-radius: 1px; }
+
+/* Years · Months · All */
+.zoom-seg {
+  position: absolute; z-index: 21; left: 50%; bottom: calc(var(--tab-gap) + var(--tab-h) + 12px);
+  transform: translateX(-50%); display: flex; gap: 2px; padding: 4px; height: 42px; border-radius: 21px;
+  transition: opacity 0.25s var(--ease-std), transform 0.3s var(--ease-out);
+}
+.zoom-seg button { height: 34px; padding: 0 16px; border-radius: 17px; font-size: 14.5px; font-weight: 600; color: var(--glass-ink); opacity: 0.86; }
+.zoom-seg button.on { background: var(--fill); opacity: 1; }
+.screen.chrome-min .zoom-seg { opacity: 0; transform: translate(-50%, 12px); pointer-events: none; }
+body.select-mode .zoom-seg { display: none; }
+@media (min-width: 761px) { .zoom-seg { bottom: 22px; } .scrubber { bottom: 80px; top: 120px; } }
+
+/* Years / Months card lists */
+.zoom-view { padding: 0 var(--gutter); display: flex; flex-direction: column; gap: 14px; }
+.zoom-card {
+  position: relative; display: block; width: 100%; overflow: hidden; border-radius: var(--r-lg);
+  background: var(--tile-bg); text-align: left; color: #fff;
+  content-visibility: auto; contain-intrinsic-size: auto 230px;
+}
+.zoom-card img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.zoom-card::after { content: ""; position: absolute; inset: 0; background: linear-gradient(0deg, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0) 55%); }
+.zoom-card .zc-text { position: absolute; left: 16px; right: 16px; bottom: 14px; z-index: 1; }
+.zoom-card b { display: block; font-weight: 800; letter-spacing: -0.03em; text-shadow: 0 1px 10px rgba(0,0,0,0.3); }
+.zoom-card span { font-size: 15px; font-weight: 600; color: rgba(255,255,255,0.86); }
+.year-card { height: 220px; }
+.year-card b { font-size: 44px; line-height: 1; }
+.month-card { height: 210px; }
+.month-card b { font-size: 26px; line-height: 1.1; }
+@media (min-width: 761px) {
+  .zoom-view { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); padding: 0 24px; }
+}
+.zoom-card:active { transform: scale(0.985); transition: transform 0.15s; }
+.img-fade { opacity: 0; transition: opacity 0.35s; }
+.img-fade.in { opacity: 1; }

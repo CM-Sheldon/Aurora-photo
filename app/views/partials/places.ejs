@@ -1,0 +1,45 @@
+<%#
+  PLACES — full-bleed world map with photo pins. The date-range chip opens the
+  shared range sheet; tapping a pin raises the place sheet (side panel on desktop).
+%>
+<section class="screen" id="screen-places" data-screen-id="places">
+  <div class="map-area" id="mapArea">
+    <svg class="world-map" id="worldMap" preserveAspectRatio="none" aria-hidden="true"></svg>
+    <div class="map-labels" id="mapLabels"></div>
+    <div class="place-pins" id="placePins"></div>
+    <div class="empty-state map-placeholder" id="mapPlaceholder" hidden>
+      <div class="empty-art"><svg class="i"><use href="#i-places"/></svg></div>
+      <h2>No places yet</h2>
+      <p>Photos with GPS coordinates appear here once they're indexed.</p>
+    </div>
+  </div>
+
+  <div class="top-scrim short"></div>
+  <header class="screen-head over map-head">
+    <button type="button" class="gbtn" id="placesRangeBtn" onclick="openPlacesRange()">
+      <svg class="i"><use href="#i-cal"/></svg><span id="pTimeRangeLabel">All time</span><svg class="i sm"><use href="#i-down"/></svg>
+    </button>
+    <div class="sh-actions">
+      <button type="button" class="gbtn round" onclick="resetMapView()" aria-label="Show all places"><svg class="i"><use href="#i-locate"/></svg></button>
+      <button type="button" class="gbtn round avatar-btn" onclick="openAccountSheet()" aria-label="Account"><span data-avatar-glyph></span></button>
+    </div>
+  </header>
+
+  <div class="map-zoom glass hover-only">
+    <button type="button" onclick="mapZoomBtn(1)" aria-label="Zoom in"><svg class="i"><use href="#i-plus"/></svg></button>
+    <button type="button" onclick="mapZoomBtn(-1)" aria-label="Zoom out"><svg class="i"><use href="#i-minus"/></svg></button>
+  </div>
+
+  <section class="place-sheet" id="placeDetail" aria-label="Place">
+    <div class="sheet-grab-area" id="placeSheetGrab"><div class="grab"></div></div>
+    <div class="ps-head">
+      <div class="ps-titles">
+        <h2 id="placeDetailName"></h2>
+        <p id="placeDetailMeta"></p>
+      </div>
+      <button type="button" class="close-btn" onclick="closePlaceSheet()" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="ps-strip" id="placeDetailGrid"></div>
+    <button type="button" class="btn wide" id="placeViewAllBtn" onclick="placeViewAll()" disabled>Show all</button>
+  </section>
+</section>

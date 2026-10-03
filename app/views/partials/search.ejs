@@ -1,0 +1,74 @@
+<%#
+  SEARCH — before typing: a discovery page (recent searches, places, tags, example
+  descriptions). With a query or filter: results header + facet chips + the
+  shared virtual grid, paged as you scroll. The search field lives in a dock that
+  sits at the bottom on phones (thumb + keyboard) and at the top on desktop.
+%>
+<section class="screen" id="screen-search" data-screen-id="search">
+  <div class="search-dock" id="searchDock">
+    <button type="button" class="dock-tab glass" id="searchDockTab" onclick="leaveSearch()" aria-label="Back to library"><svg class="i"><use href="#i-library"/></svg></button>
+    <label class="search-field glass" id="searchField">
+      <span class="sf-icon" id="searchIcon"><svg class="i"><use href="#i-search"/></svg></span>
+      <span class="sf-tokens" id="searchChips"></span>
+      <input type="search" id="searchInput" placeholder="Search your photos" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+      <button type="button" class="sf-clear" id="searchClear" onclick="clearSearchAll()" aria-label="Clear search" hidden><svg class="i"><use href="#i-x"/></svg></button>
+    </label>
+  </div>
+
+  <div class="scroller page-scroll" id="searchResults">
+    <!-- Discovery (no query, no filters) -->
+    <div id="searchDiscover">
+      <header class="screen-head solid">
+        <div class="sh-text"><h1>Search</h1></div>
+        <div class="sh-actions">
+          <button type="button" class="gbtn round avatar-btn" onclick="openAccountSheet()" aria-label="Account"><span data-avatar-glyph></span></button>
+        </div>
+      </header>
+      <section class="coll-section" id="discRecentSec" hidden>
+        <div class="sec-title-row"><h2 class="sec-title">Recent</h2><button type="button" class="link-btn" onclick="clearRecentSearches()">Clear</button></div>
+        <div class="chip-row" id="discRecent"></div>
+      </section>
+      <section class="coll-section">
+        <h2 class="sec-title">Show</h2>
+        <div class="chip-row" id="discKinds">
+          <button type="button" class="chip" onclick="searchQuick({kind:'photo'})"><svg class="i sm"><use href="#i-photo"/></svg>Photos</button>
+          <button type="button" class="chip" onclick="searchQuick({kind:'video'})"><svg class="i sm"><use href="#i-video"/></svg>Videos</button>
+          <button type="button" class="chip" onclick="searchQuick({fav:true})"><svg class="i sm"><use href="#i-heart"/></svg>Favourites</button>
+        </div>
+      </section>
+      <section class="coll-section" id="discPlacesSec" hidden>
+        <h2 class="sec-title">Places</h2>
+        <div class="hrow" id="discPlaces"></div>
+      </section>
+      <section class="coll-section" id="discTagsSec" hidden>
+        <h2 class="sec-title">Tags</h2>
+        <div class="hrow" id="discTags"></div>
+      </section>
+      <section class="coll-section" id="discDescribeSec" hidden>
+        <h2 class="sec-title">Describe a photo</h2>
+        <div class="group" id="discDescribe"></div>
+      </section>
+    </div>
+
+    <!-- Results -->
+    <div id="searchResultsWrap" hidden>
+      <header class="results-head">
+        <div class="sh-text">
+          <h1 id="searchResultsCount"></h1>
+          <p id="searchQueryLine"></p>
+        </div>
+        <div class="sh-actions">
+          <button type="button" class="gbtn" id="searchSelectBtn" data-perm-any="photos.tag photos.download photos.hidden photos.delete photos.favorite albums.manage" onclick="toggleSelectMode()">Select</button>
+        </div>
+      </header>
+      <div class="facet-row" id="facetRow"></div>
+      <div class="results-note" id="searchCorrected"></div>
+      <div class="vgrid" id="searchGrid"></div>
+      <div class="empty-state" id="searchEmpty" hidden>
+        <div class="empty-art"><svg class="i"><use href="#i-search"/></svg></div>
+        <h2>No results</h2>
+        <p>Try fewer or different words. Search matches places, dates, cameras, tags and photo descriptions, and tolerates typos.</p>
+      </div>
+    </div>
+  </div>
+</section>

@@ -136,6 +136,8 @@ function initSchema() {
       d.run(`CREATE INDEX IF NOT EXISTS idx_assets_dup ON assets(duplicate_of)`);
       d.run(`CREATE INDEX IF NOT EXISTS idx_assets_hash ON assets(file_hash)`);
       d.run(`CREATE INDEX IF NOT EXISTS idx_assets_removed ON assets(removed)`);
+      // "Recently added" collection sorts by import time.
+      d.run(`CREATE INDEX IF NOT EXISTS idx_assets_indexed ON assets(indexed_at)`);
 
       // ── One-shot cleanup: drop the old "Detected content" feature ───────
       // The COCO-SSD object-label store used to live here. AI captions

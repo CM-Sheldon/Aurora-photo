@@ -8,11 +8,48 @@ aurora-photos/            ← repo root (this)
 ├─ app/                   the application (this is what gets deployed)
 │  ├─ server.js
 │  ├─ version.json        ← single source of truth for the version
-│  ├─ src/ views/ public/ scripts/ data/cities.tsv
+│  ├─ src/ views/ public/ scripts/ data/cities.tsv   (UI: views/partials + public/ui)
 │  └─ package.json
 ├─ scripts/build-release.sh   builds the installer + update zips
+├─ tools/ui-check/        headless browser checks for the UI (never deployed)
 └─ .github/workflows/release.yml   CI that publishes a Release on a version tag
 ```
+
+## Front-end map (Aurora 2)
+
+The web UI is plain HTML/CSS/JS — no build step. One page, `/aurora`:
+
+| Where | What |
+|-------|------|
+| `app/views/aurora.ejs` | Shell: `<head>`, the partial includes, and the ordered CSS/JS lists |
+| `app/views/partials/*.ejs` | Markup per area: `library`, `places`, `collections` (+ detail view), `search`, `settings`, `viewer`, `overlays`, `sidebar`, `tabbar`, `icons` (SVG sprite) |
+| `app/public/ui/css/` | `tokens` (all colours/themes) · `base` (shell, nav, glass, lists, sheets, dialogs, menus) · `grid` · `viewer` · `screens` · `settings` |
+| `app/public/ui/js/` | Classic scripts sharing one global scope, loaded in the order listed in `aurora.ejs` |
+
+JS modules: `core` (state, helpers, permissions, theme, `switchScreen`, `ScrollChrome`) ·
+`sheets` (bottom sheets, `uiConfirm`/`uiPrompt`, `openMenu`, date-range sheet) ·
+`grid` (`VirtualGrid` — every photo grid, zoom levels, swipe-select, long-press) ·
+`library` · `viewer` (gestures, filmstrip, info sheet) · `select` (bulk actions, share and album pickers) ·
+`search` · `places` · `collections` (detail view, albums, Hidden, Recently removed) ·
+`settings` (settings stack, import, captions, duplicates, maintenance, **the updater**) ·
+`admin` (`/me`, account sheet, users, roles, activity log) · `boot`.
+
+Rules the tests in `app/tests/ui-regressions.test.js` enforce:
+
+- Every `/ui` URL carries `?v=<build>` — **bump `version.json` `build` on every deploy**.
+- Inline `onclick=` handlers must name functions that exist in `/ui/js`.
+- `backdrop-filter` only on allow-listed small floating pieces, never `saturate()`
+  (a blurred full-width bar over a scrolling grid janked iPhone scrolling in v1.5).
+- Live Photo hover previews only for a real mouse (`pointerType === 'mouse'`).
+- No third-party fonts or scripts — the app must work with no internet.
+
+Also: element ids in the partials are read by the JS (grep before renaming), and
+controls are permission-gated with `data-perm` / `data-perm-any` (the server
+enforces every permission regardless).
+
+To check the UI in a real browser engine, use `tools/ui-check/` (headless
+iPhone + desktop screenshots, touch-gesture tests, scroll perf) against a
+throwaway copy started by `tools/ui-check/dev-server.sh`.
 
 The repo holds **code only**. Real data (the SQLite DB, thumbnail cache) lives on
 the server under `/var/lib/aurora-photos/` and is never committed and never

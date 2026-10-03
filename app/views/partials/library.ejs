@@ -1,0 +1,46 @@
+<%#
+  LIBRARY — edge-to-edge virtual grid (#photoGrid) inside #libScroll. The title,
+  buttons and scrubber float over the photos; the grid reserves a matching top
+  inset so the newest row starts below the title and then scrolls under it.
+  Years / Months are alternative zoom levels rendered into the same scroller.
+%>
+<section class="screen active" id="screen-library" data-screen-id="library">
+  <div class="scroller" id="libScroll">
+    <div class="vgrid" id="photoGrid"></div>
+    <div class="zoom-view" id="libYears" hidden></div>
+    <div class="zoom-view" id="libMonths" hidden></div>
+    <div class="empty-state" id="libraryEmpty" hidden>
+      <div class="empty-art"><svg class="i"><use href="#i-photo"/></svg></div>
+      <h2>No photos yet</h2>
+      <p>Connect a folder or network share and Aurora will index it. Your original files are never changed.</p>
+      <button type="button" class="btn" data-perm="settings.manage" onclick="openSettings('sources')">Add photos</button>
+    </div>
+    <div class="loading-state" id="libraryLoading"><span class="spinner"></span></div>
+  </div>
+
+  <div class="top-scrim"></div>
+  <header class="screen-head over" id="libHeader">
+    <div class="sh-text">
+      <h1>Library</h1>
+      <p id="libSubtitle">&nbsp;</p>
+    </div>
+    <div class="sh-actions">
+      <button type="button" class="gbtn round" id="libViewBtn" onclick="openLibraryViewMenu(this)" aria-label="View options"><svg class="i"><use href="#i-filter"/></svg></button>
+      <button type="button" class="gbtn" id="libSelectBtn" data-perm-any="photos.tag photos.download photos.hidden photos.delete photos.favorite albums.manage" onclick="toggleSelectMode()">Select</button>
+      <button type="button" class="gbtn round avatar-btn" onclick="openAccountSheet()" aria-label="Account"><span data-avatar-glyph></span></button>
+    </div>
+    <div class="filter-pills" id="libFilterRow" hidden></div>
+  </header>
+
+  <div class="scrubber" id="libScrubber" aria-hidden="true">
+    <div class="scrub-track"></div>
+    <div class="scrub-years" id="scrubYears"></div>
+    <div class="scrub-handle" id="scrubHandle"><span class="scrub-label" id="scrubLabel"></span></div>
+  </div>
+
+  <div class="zoom-seg glass" id="libZoomSeg" role="tablist" aria-label="Zoom level">
+    <button type="button" data-zoomview="years">Years</button>
+    <button type="button" data-zoomview="months">Months</button>
+    <button type="button" data-zoomview="all" class="on">All</button>
+  </div>
+</section>

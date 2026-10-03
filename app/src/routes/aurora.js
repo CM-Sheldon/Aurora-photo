@@ -207,8 +207,12 @@ function buildAssetFilters(query, exclude = new Set()) {
   return { clauses: base, params };
 }
 
-// GET /api/aurora/assets?from&to&place&person&kind&fav&q&hideRaw&limit&offset&count&facets
+// GET /api/aurora/assets?from&to&place&person&kind&fav&q&hideRaw&limit&offset&count&facets&order&mode
 // `place` accepts a single id or a comma-separated list (used by map clusters).
+// `order=added` sorts newest-imported first (the "Recently added" collection);
+// the default is newest-captured first. `mode=or` runs the free-text query in
+// its OR form straight away — used to page through results whose first page
+// fell back to OR matching (fallbacks only run on page 1).
 // `q` is free-text search (see buildSearch). `count=1` also returns the total
 // number of matches (the Search screen uses it to show an accurate result count).
 // `facets=1` also returns per-dimension chip counts so the Search sidebar can
@@ -237,7 +241,9 @@ router.get('/assets', async (req, res) => {
               p.name AS place_name, p.country AS place_country
        ${FROM}
        WHERE {WHERE}
-       ORDER BY CASE WHEN a.taken_at IS NULL THEN 1 ELSE 0 END, a.taken_at DESC
+       ORDER BY ${req.query.order === 'added'
+         ? 'a.indexed_at DESC, a.id DESC'
+         : 'CASE WHEN a.taken_at IS NULL THEN 1 ELSE 0 END, a.taken_at DESC'}
        LIMIT ? OFFSET ?`;
 
     async function runSelect(clauses, params) {
@@ -247,8 +253,9 @@ router.get('/assets', async (req, res) => {
     let searchSql = '', searchParams = [], fuzzy = false, corrected = null, andTokens = 0;
     const rawQ = q && String(q).trim() ? String(q).trim() : '';
     if (rawQ) {
-      const and = buildSearch(rawQ, 'and');
-      searchSql = and.sql; searchParams = and.params; andTokens = and.tokens;
+      const first = buildSearch(rawQ, req.query.mode === 'or' ? 'or' : 'and');
+      searchSql = first.sql; searchParams = first.params; andTokens = first.tokens;
+      if (req.query.mode === 'or') fuzzy = true;
     }
 
     let conditions = searchSql ? [...base, searchSql] : base;
@@ -443,11 +450,16 @@ router.get('/assets/index', async (req, res) => {
   try {
     const extra = req.query.hideRaw === '1' ? rawExclusion('path') : { sql: '', params: [] };
     const rows = await db.all(
-      `SELECT id, taken_at AS t, kind AS k, fav AS f, live_video_id AS lv FROM assets
+      `SELECT id, taken_at AS t, kind AS k, fav AS f, live_video_id AS lv,
+              CASE WHEN kind = 'video' THEN CAST(ROUND(duration_s) AS INTEGER) END AS d
+       FROM assets
        WHERE is_live_motion = 0 AND hidden = 0 AND duplicate_of IS NULL AND removed = 0${extra.sql ? ' AND ' + extra.sql : ''}
        ORDER BY CASE WHEN taken_at IS NULL THEN 1 ELSE 0 END, taken_at DESC`,
       extra.params
     );
+    // `d` (video seconds, for the tile badge) only exists on videos — drop the
+    // null keys so 100k+ photos don't each carry "d":null over the wire.
+    for (const r of rows) if (r.d == null) delete r.d;
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -607,7 +619,8 @@ router.get('/places', async (req, res) => {
     if (Number.isFinite(to))   { range.push('a.taken_at <= ?'); rangeParams.push(to); }
     const rows = await db.all(
       `SELECT p.id, p.name, p.country, p.lat, p.lon, COUNT(a.id) AS count,
-              MIN(a.taken_at) AS first_date, MAX(a.taken_at) AS last_date
+              MIN(a.taken_at) AS first_date, MAX(a.taken_at) AS last_date,
+              COALESCE(MAX(CASE WHEN a.kind = 'photo' THEN a.id END), MAX(a.id)) AS cover_id
        FROM places p
        JOIN assets a ON a.place_id = p.id AND a.is_live_motion = 0 AND a.hidden = 0 AND a.duplicate_of IS NULL AND removed = 0
        ${extra.sql ? 'AND ' + extra.sql : ''}
@@ -671,7 +684,8 @@ router.get('/cameras', async (req, res) => {
 router.get('/countries', async (req, res) => {
   try {
     const rows = await db.all(
-      `SELECT p.country AS country, COUNT(a.id) AS count
+      `SELECT p.country AS country, COUNT(a.id) AS count,
+              COALESCE(MAX(CASE WHEN a.kind = 'photo' THEN a.id END), MAX(a.id)) AS cover_id
        FROM places p JOIN assets a ON a.place_id = p.id AND a.is_live_motion = 0 AND a.hidden = 0 AND a.duplicate_of IS NULL AND removed = 0
        WHERE p.country IS NOT NULL AND p.country != ''
        GROUP BY p.country ORDER BY count DESC`
@@ -688,7 +702,8 @@ router.get('/countries', async (req, res) => {
 router.get('/tags', async (req, res) => {
   try {
     const rows = await db.all(
-      `SELECT t.id, t.name, COUNT(a.id) AS count
+      `SELECT t.id, t.name, COUNT(a.id) AS count,
+              COALESCE(MAX(CASE WHEN a.kind = 'photo' THEN a.id END), MAX(a.id)) AS cover_id
        FROM tags t
        LEFT JOIN asset_tags at ON at.tag_id = t.id
        LEFT JOIN assets a ON a.id = at.asset_id AND a.is_live_motion = 0 AND a.hidden = 0 AND a.duplicate_of IS NULL AND removed = 0
@@ -944,6 +959,27 @@ router.post('/tags/for-assets', async (req, res) => {
     const out = [...counts.entries()].map(([id, c]) => ({ id, name: names.get(id), count: c }))
       .sort((a, b) => b.count - a.count);
     res.json(out);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/aurora/fav/bulk  { assetIds:[...], fav: 1|0 } — set (not toggle) the
+// favourite flag on many assets at once (multi-select "Favourite").
+router.post('/fav/bulk', requirePerm('photos.favorite'), async (req, res) => {
+  try {
+    const ids = (Array.isArray(req.body.assetIds) ? req.body.assetIds : [])
+      .map((n) => parseInt(n, 10)).filter(Number.isFinite).slice(0, 20000);
+    const fav = req.body.fav ? 1 : 0;
+    if (!ids.length) return res.status(400).json({ error: 'No assets given' });
+    let changed = 0;
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      const r = await db.run(`UPDATE assets SET fav = ? WHERE fav != ? AND id IN (${chunk.map(() => '?').join(',')})`, [fav, fav, ...chunk]);
+      changed += (r && r.changes) || 0;
+    }
+    auth.audit(req.user, fav ? 'photo.favorite' : 'photo.unfavorite', `${ids.length} items`, { changed });
+    res.json({ fav, changed });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1377,6 +1413,12 @@ router.get('/albums', async (req, res) => {
     const videos = await db.get(`SELECT COUNT(*) AS count FROM assets WHERE kind="video" AND ${BASE_COND}`);
     const recent = await db.get(`SELECT COUNT(*) AS count FROM assets WHERE ${BASE_COND} AND taken_at > ?`, [Date.now() - 30 * 24 * 3600 * 1000]);
     const hidden = await db.get('SELECT COUNT(*) AS count FROM assets WHERE hidden=1 AND is_live_motion=0 AND removed=0');
+    // Cover photos for the smart albums (the Hidden album never gets one — it
+    // must not leak a thumbnail before the passcode is entered).
+    const favCover = await db.get(`SELECT id FROM assets WHERE fav=1 AND ${BASE_COND} ORDER BY kind = 'photo' DESC, taken_at DESC LIMIT 1`);
+    const vidCover = await db.get(`SELECT id FROM assets WHERE kind='video' AND ${BASE_COND} ORDER BY taken_at DESC LIMIT 1`);
+    const addedCover = await db.get(`SELECT id FROM assets WHERE ${BASE_COND} ORDER BY indexed_at DESC, id DESC LIMIT 1`);
+    const total = await db.get(`SELECT COUNT(*) AS count FROM assets WHERE ${BASE_COND}`);
 
     // Auto-events: group by year/month
     const events = await db.all(
@@ -1394,9 +1436,10 @@ router.get('/albums', async (req, res) => {
 
     const canSeeHidden = !!(req.user && req.user.permissions.includes('photos.hidden'));
     const smart = [
-      { id: 'favorites', name: 'Favorites', icon: 'heart', count: favorites.count, query: { fav: '1' } },
-      { id: 'videos', name: 'Videos', icon: 'film', count: videos.count, query: { kind: 'video' } },
+      { id: 'favorites', name: 'Favorites', icon: 'heart', count: favorites.count, cover_id: favCover ? favCover.id : null, query: { fav: '1' } },
+      { id: 'videos', name: 'Videos', icon: 'film', count: videos.count, cover_id: vidCover ? vidCover.id : null, query: { kind: 'video' } },
       { id: 'recent', name: 'Recent 30 days', icon: 'clock', count: recent.count, query: { from: Date.now() - 30 * 24 * 3600 * 1000 } },
+      { id: 'added', name: 'Recently added', icon: 'clock', count: total.count, cover_id: addedCover ? addedCover.id : null, query: { order: 'added' } },
     ];
     if (canSeeHidden) smart.push({ id: 'hidden', name: 'Hidden', icon: 'lock', count: hidden.count, query: { showHidden: '1' } });
 

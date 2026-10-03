@@ -1,0 +1,14 @@
+{
+  "name": "aurora-ui-check",
+  "private": true,
+  "description": "Headless iPhone/desktop checks for the Aurora web UI (not part of the app; never deployed)",
+  "type": "module",
+  "scripts": {
+    "smoke": "node smoke.mjs",
+    "gestures": "node gestures.mjs",
+    "perf": "node perf.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.0"
+  }
+}

@@ -30,3 +30,6 @@ Thumbs.db
 # Internal handoff / scratch notes (may contain local paths, IPs, hostnames)
 *_HANDOFF.md
 NOTES.local.md
+
+# UI check screenshots contain real photos — never commit them
+tools/ui-check/out/

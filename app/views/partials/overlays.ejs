@@ -1,0 +1,57 @@
+<%#
+  Overlays shared by every screen: the account sheet, the passcode prompt, the
+  RBAC dialog surface, and the hosts that sheets.js fills on demand (bottom
+  sheets, alert/confirm/prompt dialogs, popover menus, toast).
+%>
+<div class="backdrop" id="sheetBackdrop"></div>
+<div id="sheetHost"></div>
+<div id="menuHost"></div>
+
+<!-- Account sheet (avatar button on every screen) -->
+<section class="sheet account-sheet" id="accountSheet" aria-label="Account">
+  <div class="sheet-grab-area"><div class="grab"></div></div>
+  <button type="button" class="close-btn sheet-close" onclick="closeAccountSheet()" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+  <div class="acct-head">
+    <div class="acct-avatar" data-avatar-glyph></div>
+    <div class="acct-name" data-avatar-name></div>
+    <div class="acct-role" id="acctRole"></div>
+  </div>
+  <div class="group-label">Theme</div>
+  <div class="theme-picker" id="themePicker">
+    <button type="button" class="theme-opt" data-theme-opt="purple" onclick="setMyTheme('purple')"><span class="theme-swatch sw-purple"></span><span>Aurora</span></button>
+    <button type="button" class="theme-opt" data-theme-opt="dark" onclick="setMyTheme('dark')"><span class="theme-swatch sw-dark"></span><span>Dark</span></button>
+    <button type="button" class="theme-opt" data-theme-opt="light" onclick="setMyTheme('light')"><span class="theme-swatch sw-light"></span><span>Light</span></button>
+  </div>
+  <div class="group">
+    <button type="button" class="row" onclick="openMyAvatarDialog()"><svg class="i"><use href="#i-palette"/></svg><span class="row-label">Choose icon</span><svg class="i chev"><use href="#i-chev"/></svg></button>
+    <button type="button" class="row" onclick="openChangePinDialog()"><svg class="i"><use href="#i-key"/></svg><span class="row-label">Change PIN</span><svg class="i chev"><use href="#i-chev"/></svg></button>
+    <button type="button" class="row" data-perm-any="settings.view users.manage roles.manage audit.view photos.hidden" onclick="closeAccountSheet(); openSettings()"><svg class="i"><use href="#i-sliders"/></svg><span class="row-label">Settings</span><svg class="i chev"><use href="#i-chev"/></svg></button>
+  </div>
+  <div class="group">
+    <button type="button" class="row center danger" onclick="doLogout()"><span class="row-label">Sign out</span></button>
+  </div>
+  <p class="acct-version" id="acctVersion"></p>
+</section>
+
+<!-- Passcode prompt (Hidden album) -->
+<div class="dialog-overlay" id="passcodeOverlay" hidden>
+  <div class="dialog passcode-card" role="dialog" aria-modal="true" aria-labelledby="passcodeTitle">
+    <div class="dialog-icon"><svg class="i"><use href="#i-lock"/></svg></div>
+    <h3 id="passcodeTitle">Hidden photos</h3>
+    <p class="dialog-msg" id="passcodeSubtitle">Enter your passcode to continue</p>
+    <input type="password" class="passcode-input" id="passcodeInput" maxlength="20" inputmode="numeric" autocomplete="off" placeholder="••••">
+    <div class="passcode-err" id="passcodeErr"></div>
+    <div class="dialog-actions">
+      <button type="button" class="dbtn" onclick="passcodeCancel()">Cancel</button>
+      <button type="button" class="dbtn strong" onclick="passcodeSubmit()">Unlock</button>
+    </div>
+  </div>
+</div>
+
+<!-- RBAC dialog surface (users / roles / PIN). When data-forced="1" (change-PIN
+     required) backdrop taps are ignored so the dialog can't be dismissed. -->
+<div class="dialog-overlay" id="rbacOverlay" hidden onclick="if(event.target===this && !this.dataset.forced) closeRbacDialog()">
+  <div class="dialog form-dialog rbac-dialog" id="rbacDialog" role="dialog" aria-modal="true"></div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>

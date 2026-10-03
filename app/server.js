@@ -45,17 +45,18 @@ app.use(compression({
 app.set('trust proxy', 1);
 
 // Local app served over HTTP. CSP permits the inline app script/styles, the PWA
-// manifest + service worker, webp thumbnails, and blob: video playback.
+// manifest + service worker, webp thumbnails, and blob: video playback. No
+// third-party fonts or scripts: the UI uses the system font and works offline.
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'"],
       scriptSrcAttr: ["'unsafe-inline'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "blob:", "https:"],
       connectSrc: ["'self'"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+      fontSrc: ["'self'", "data:"],
       objectSrc: ["'none'"],
       mediaSrc: ["'self'", "blob:"],
       frameSrc: ["'none'"],

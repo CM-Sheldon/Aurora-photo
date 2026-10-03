@@ -1,0 +1,35 @@
+<%# Desktop sidebar (≥761px). Phones use the floating tab bar in tabbar.ejs instead. %>
+<aside class="sidebar" id="sidebar">
+  <div class="sb-brand">
+    <span class="logo-mark"><svg class="i"><use href="#i-aurora"/></svg></span>
+    <span class="sb-name">Aurora</span>
+    <button type="button" class="sb-collapse" onclick="toggleSidebar()" title="Collapse sidebar" aria-label="Collapse sidebar"><svg class="i"><use href="#i-sidebar"/></svg></button>
+  </div>
+  <nav class="sb-nav" aria-label="Main">
+    <button type="button" class="nav-item active" data-screen="library" data-tip="Library">
+      <svg class="i"><use href="#i-library"/></svg><span class="nav-label">Library</span><span class="nav-badge" id="navBadgeLibrary"></span>
+    </button>
+    <button type="button" class="nav-item" data-screen="places" data-tip="Places">
+      <svg class="i"><use href="#i-places"/></svg><span class="nav-label">Places</span><span class="nav-badge" id="navBadgePlaces"></span>
+    </button>
+    <button type="button" class="nav-item" data-screen="collections" data-tip="Collections">
+      <svg class="i"><use href="#i-collections"/></svg><span class="nav-label">Collections</span>
+    </button>
+    <button type="button" class="nav-item" data-screen="search" data-tip="Search">
+      <svg class="i"><use href="#i-search"/></svg><span class="nav-label">Search</span>
+    </button>
+    <div class="nav-section" data-perm-any="settings.view users.manage roles.manage audit.view photos.hidden">System</div>
+    <button type="button" class="nav-item" data-screen="settings" data-perm-any="settings.view users.manage roles.manage audit.view photos.hidden" data-tip="Settings">
+      <svg class="i"><use href="#i-sliders"/></svg><span class="nav-label">Settings</span>
+    </button>
+  </nav>
+  <div class="sb-stats" id="sidebarStats">
+    <div class="stat-row"><span>Photos</span><b id="statPhotos">—</b></div>
+    <div class="stat-row"><span>Videos</span><b id="statVideos">—</b></div>
+    <div class="stat-row"><span>Places</span><b id="statPlaces">—</b></div>
+    <div class="stat-row"><span>Storage</span><b id="statStorage">—</b></div>
+  </div>
+  <button type="button" class="sb-account" onclick="openAccountSheet()" aria-label="Account">
+    <span class="avatar-glyph" data-avatar-glyph></span><span class="sb-account-name" data-avatar-name></span>
+  </button>
+</aside>

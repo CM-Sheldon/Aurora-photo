@@ -5,101 +5,89 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
   <title>Aurora · <%= mode === 'setup' ? 'Set up admin' : 'Sign in' %></title>
   <link rel="manifest" href="/aurora-manifest.json">
-  <meta name="theme-color" content="#06060c">
+  <meta name="theme-color" content="#000000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="apple-touch-icon" href="/aurora-icon-180.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
+    /* Aurora 2 sign-in. The animated aurora backdrop lives here (and on empty
+       states) — the app itself keeps a plain black canvas behind photos. */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --void: #06060c;
-      --panel: rgba(255,255,255,0.05);
-      --panel-hover: rgba(255,255,255,0.08);
-      --border: rgba(255,255,255,0.10);
-      --border-strong: rgba(255,255,255,0.18);
-      --text: rgba(255,255,255,0.92);
-      --text-muted: rgba(255,255,255,0.45);
+      --canvas: #000;
+      --surface: rgba(28, 27, 34, 0.72);
+      --field: rgba(255, 255, 255, 0.08);
+      --sep: rgba(255, 255, 255, 0.12);
+      --label: #fff;
+      --label-2: rgba(235, 235, 245, 0.62);
       --accent: #a78bfa;
-      --accent-sky: #7dd3fc;
-      --accent-orchid: #f0abfc;
-      --danger: #f87171;
-      --radius: 16px;
-      --radius-sm: 10px;
-      --font-mono: 'JetBrains Mono', monospace;
+      --accent-ink: #160d33;
+      --danger: #ff453a;
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Segoe UI", Roboto, system-ui, sans-serif;
+      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      color-scheme: dark;
     }
-    html, body { height: 100%; }
+    html, body { height: 100%; background: var(--canvas); }
     body {
-      background: var(--void);
-      color: var(--text);
-      font-family: 'Space Grotesk', sans-serif;
-      font-size: 14px;
-      display: flex; align-items: center; justify-content: center;
-      overflow: hidden;
+      color: var(--label); font-family: var(--font); font-size: 16px; line-height: 1.35;
+      display: flex; align-items: center; justify-content: center; overflow: hidden;
+      padding: env(safe-area-inset-top, 0px) 16px env(safe-area-inset-bottom, 0px);
+      -webkit-font-smoothing: antialiased;
     }
     .aurora-bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
     .aurora-bg span {
-      position: absolute; border-radius: 50%; filter: blur(120px);
-      opacity: 0.18; mix-blend-mode: screen; animation: drift 32s linear infinite;
+      position: absolute; border-radius: 50%; filter: blur(110px);
+      opacity: 0.32; mix-blend-mode: screen; animation: drift 32s linear infinite;
     }
-    .aurora-bg span:nth-child(1) { width: 700px; height: 500px; background: var(--accent); top: -100px; left: -150px; }
-    .aurora-bg span:nth-child(2) { width: 600px; height: 600px; background: var(--accent-sky); bottom: -200px; right: -100px; animation-delay: -12s; }
-    .aurora-bg span:nth-child(3) { width: 500px; height: 400px; background: var(--accent-orchid); top: 40%; left: 40%; animation-delay: -20s; }
-    @keyframes drift {
-      0% { transform: translate(0,0) scale(1); }
-      50% { transform: translate(60px,-40px) scale(1.05); }
-      100% { transform: translate(0,0) scale(1); }
-    }
+    .aurora-bg span:nth-child(1) { width: 640px; height: 460px; background: #a78bfa; top: -120px; left: -160px; }
+    .aurora-bg span:nth-child(2) { width: 560px; height: 560px; background: #7dd3fc; bottom: -220px; right: -120px; animation-delay: -12s; }
+    .aurora-bg span:nth-child(3) { width: 460px; height: 380px; background: #f0abfc; top: 40%; left: 40%; animation-delay: -20s; }
+    @keyframes drift { 0% { transform: translate(0,0) scale(1); } 50% { transform: translate(60px,-40px) scale(1.06); } 100% { transform: translate(0,0) scale(1); } }
+    @media (prefers-reduced-motion: reduce) { .aurora-bg span { animation: none; } }
     .card {
-      position: relative; z-index: 1;
-      width: min(400px, 92vw);
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 32px 28px;
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      position: relative; z-index: 1; width: min(380px, 100%);
+      background: var(--surface); border: 0.5px solid var(--sep); border-radius: 28px;
+      padding: 30px 24px 26px;
+      -webkit-backdrop-filter: blur(30px); backdrop-filter: blur(30px);
+      box-shadow: 0 30px 80px rgba(0,0,0,0.5);
     }
-    .brand {
-      font-family: var(--font-mono);
-      font-size: 12px; letter-spacing: 3px; text-transform: uppercase;
-      color: var(--text-muted); margin-bottom: 8px;
+    .mark {
+      width: 60px; height: 60px; border-radius: 17px; margin: 0 auto 14px;
+      display: flex; align-items: center; justify-content: center; color: #fff;
+      background: linear-gradient(135deg, #a78bfa, #7dd3fc 60%, #f0abfc);
+      box-shadow: 0 10px 30px rgba(167,139,250,0.35);
     }
-    h1 {
-      font-size: 22px; font-weight: 600; margin-bottom: 6px;
-      background: linear-gradient(135deg, #fff, var(--accent-sky));
-      -webkit-background-clip: text; background-clip: text; color: transparent;
-    }
-    p.lede { color: var(--text-muted); margin-bottom: 22px; font-size: 13px; line-height: 1.5; }
-    label { display: block; font-size: 12px; color: var(--text-muted); margin: 14px 0 6px; letter-spacing: 0.5px; text-transform: uppercase; }
+    .mark svg { width: 30px; height: 30px; }
+    .brand { text-align: center; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--label-2); margin-bottom: 4px; }
+    h1 { text-align: center; font-size: 28px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 6px; }
+    p.lede { text-align: center; color: var(--label-2); margin-bottom: 18px; font-size: 15px; line-height: 1.45; }
+    label { display: block; font-size: 13px; font-weight: 600; color: var(--label-2); margin: 14px 0 6px; }
     input {
-      width: 100%; padding: 12px 14px;
-      background: rgba(0,0,0,0.3);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      color: var(--text); font-family: inherit; font-size: 15px;
-      outline: none; transition: border-color .15s;
+      width: 100%; height: 50px; padding: 0 14px;
+      background: var(--field); border: 1px solid transparent; border-radius: 14px;
+      color: var(--label); font-family: inherit; font-size: 17px; outline: none;
+      transition: border-color .15s;
     }
     input:focus { border-color: var(--accent); }
-    input.pin { font-family: var(--font-mono); letter-spacing: 12px; text-align: center; font-size: 22px; padding-left: 22px; }
+    input.pin { font-family: var(--mono); letter-spacing: 14px; text-align: center; font-size: 24px; padding-left: 24px; }
     button {
-      width: 100%; margin-top: 22px; padding: 12px;
-      background: linear-gradient(135deg, var(--accent), var(--accent-sky));
-      color: #06060c; font-family: inherit; font-weight: 600; font-size: 14px;
-      border: none; border-radius: var(--radius-sm);
-      cursor: pointer; letter-spacing: 0.5px;
+      width: 100%; height: 50px; margin-top: 22px;
+      background: var(--accent); color: var(--accent-ink);
+      font-family: inherit; font-weight: 600; font-size: 17px;
+      border: none; border-radius: 25px; cursor: pointer;
     }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
-    button:hover:not(:disabled) { filter: brightness(1.08); }
-    .msg { margin-top: 14px; padding: 10px 12px; border-radius: var(--radius-sm); font-size: 13px; display: none; }
-    .msg.err { background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3); color: var(--danger); }
+    button:active:not(:disabled) { transform: scale(0.98); }
+    .msg { margin-top: 14px; padding: 10px 12px; border-radius: 12px; font-size: 14px; display: none; }
+    .msg.err { background: rgba(255,69,58,0.14); color: var(--danger); }
     .msg.err.show { display: block; }
-    .hint { margin-top: 16px; font-size: 12px; color: var(--text-muted); text-align: center; }
+    .hint { margin-top: 16px; font-size: 13px; color: var(--label-2); text-align: center; }
   </style>
 </head>
 <body>
   <div class="aurora-bg"><span></span><span></span><span></span></div>
   <form class="card" id="f" autocomplete="off">
+    <div class="mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.8l1.9 6.1 6.3.2-5.1 3.8 1.9 6.2-5-3.7-5 3.7 1.9-6.2-5.1-3.8 6.3-.2z"/></svg></div>
     <div class="brand">Aurora</div>
     <% if (mode === 'setup') { %>
       <h1>Set up admin</h1>

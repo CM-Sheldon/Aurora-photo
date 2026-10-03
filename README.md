@@ -44,7 +44,8 @@ That downloads the latest release and runs the installer. When it finishes it
 prints a URL like `http://<server-ip>:8080/aurora` — open it in a browser.
 **The first visitor sets up the admin account** (username + 4-digit PIN); from
 then on the app requires login, and the admin can add users and roles from
-**Settings → Users & roles**.
+**Settings → Users** and **Settings → Roles** (on a phone, Settings opens from
+your avatar in the top-right corner).
 
 Prefer not to pipe a script into `sudo bash`? Download the installer zip from the
 [latest release](https://github.com/CM-Sheldon/Aurora-photo/releases/latest),
@@ -55,8 +56,9 @@ idempotent — if anything fails, fix it and run it again; user data is preserve
 
 Everything is built in — no command line needed.
 
-Open **Settings → System**. Aurora checks GitHub for the newest release and shows
-the changelog; one click on **Update now** downloads it, applies it, and restarts.
+Open **Settings → Software update** (on a phone: tap your avatar, then
+Settings). Aurora checks GitHub for the newest release and shows the changelog;
+one click on **Update now** downloads it, applies it, and restarts.
 A rollback snapshot and a database backup are taken automatically before every
 install, and a failed update reverts to the previous version on its own.
 
@@ -65,9 +67,15 @@ touched by updates.**
 
 ## Highlights
 
-- **Library** — virtualized grid that stays fluid at 100k+ items, month headers,
-  a dual-thumb time-range slider, and a toolbar that gets out of the way as you
-  scroll.
+- **Built for the iPhone home screen** — an edge-to-edge grid with the controls
+  floating at the bottom where your thumb is, an iOS-style tab bar, swipe and
+  pinch gestures throughout, and light, dark and Aurora themes.
+- **Library** — a virtualized grid that stays fluid at 100k+ items. Pinch to
+  change the tile size, switch between Years, Months and All, drag the scrubber
+  to fly through time, and filter by type or date.
+- **Viewer** — swipe between photos, swipe down to close, swipe up for Info
+  (description, date, place on a mini map, tags, camera), press and hold to play
+  a Live Photo, and a filmstrip to scrub along.
 - **Search that just works** — type anything (`cyprus 2019`, `iphone videos`, a
   tag name). Matches places, cameras, dates, file names and tags, auto-completes
   partial words, and corrects typos.
@@ -76,12 +84,13 @@ touched by updates.**
 - **Places** — your photos on a world map with offline place names (bundled
   dataset, no API keys), clustering, and a timeline filter that narrows the map
   to any date range.
-- **Albums & sharing** — manual albums, auto month events, On This Day memories,
-  and public share links for individual albums.
+- **Collections** — On This Day memories, favourites, videos, recently added,
+  your albums (with public share links) and tags in one place, plus Hidden,
+  Recently removed and Duplicates under Utilities.
 - **Live Photos** — stills pair with their motion clips and play in place.
 - **Privacy** — passcode-protected hidden album, duplicate detection, and
   soft-remove (photos leave the library but originals stay on disk, undoable
-  from Settings).
+  from Recently removed).
 - **Users, roles & audit** — per-user accounts with fine-grained permissions,
   per-account themes and avatars, and an audit log of sign-ins and actions.
 

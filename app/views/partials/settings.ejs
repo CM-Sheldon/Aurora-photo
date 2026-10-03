@@ -1,0 +1,398 @@
+<%#
+  SETTINGS — an iPhone-style navigation stack. The root page is a grouped list;
+  each row pushes one .spage (openSettingsPage('<name>') in settings.js). Element
+  ids inside the pages are the ones settings.js / admin.js drive, so keep them
+  stable when restyling. Rows/groups are permission-gated with data-perm.
+%>
+<section class="screen" id="screen-settings" data-screen-id="settings">
+  <div class="settings-stack" id="settingsStack">
+
+    <!-- ── ROOT ───────────────────────────────────────────────────────── -->
+    <div class="spage active" data-page="root">
+      <div class="scroller page-scroll">
+        <header class="screen-head solid spage-head">
+          <button type="button" class="gbtn round back-btn" onclick="closeSettings()" aria-label="Close settings"><svg class="i"><use href="#i-back"/></svg></button>
+          <div class="sh-text"><h1>Settings</h1></div>
+        </header>
+        <div class="settings-root">
+          <div class="group-label">Library</div>
+          <div class="group">
+            <button type="button" class="row" data-perm="settings.view" onclick="openSettingsPage('overview')"><span class="itile" style="--c:var(--c-blue)"><svg class="i"><use href="#i-stats"/></svg></span><span class="row-label">Overview</span><span class="val" id="sOverviewVal"></span><svg class="i chev"><use href="#i-chev"/></svg></button>
+            <button type="button" class="row" data-perm="settings.manage" onclick="openSettingsPage('sources')"><span class="itile" style="--c:var(--c-teal)"><svg class="i"><use href="#i-server"/></svg></span><span class="row-label">Sources &amp; import</span><svg class="i chev"><use href="#i-chev"/></svg></button>
+            <button type="button" class="row" data-perm="settings.view" onclick="openSettingsPage('display')"><span class="itile" style="--c:var(--c-gray)"><svg class="i"><use href="#i-eye"/></svg></span><span class="row-label">Display</span><svg class="i chev"><use href="#i-chev"/></svg></button>
+          </div>
+
+          <div class="group-label">Organise</div>
+          <div class="group">
+            <button type="button" class="row" data-perm="settings.manage" onclick="openSettingsPage('tags')"><span class="itile" style="--c:var(--c-orange)"><svg class="i"><use href="#i-tag"/></svg></span><span class="row-label">Tags</span><svg class="i chev"><use href="#i-chev"/></svg></button>
+            <button type="button" class="row" data-perm="settings.manage" onclick="openSettingsPage('captions')"><span class="itile" style="--c:var(--c-purple)"><svg class="i"><use href="#i-sparkle"/></svg></span><span class="row-label">Photo descriptions</span><svg class="i chev"><use href="#i-chev"/></svg></button>
+            <button type="button" class="row" data-perm="settings.view" onclick="openSettingsPage('duplicates')"><span class="itile" style="--c:var(--c-cyan)"><svg class="i"><use href="#i-dupes"/></svg></span><span class="row-label">Duplicates</span><svg class="i chev"><use href="#i-chev"/></svg></button>
+          </div>
+
+          <div class="group-label">People &amp; privacy</div>
+          <div class="group">
+            <button type="button" class="row" data-perm="users.manage" onclick="openSettingsPage('users')"><span class="itile" style="--c:var(--c-green)"><svg class="i"><use href="#i-people"/></svg></span><span class="row-label">Users</span><span class="val" id="sUsersVal"></span><svg class="i chev"><use href="#i-chev"/></svg></button>
+            <button type="button" class="row" data-perm="roles.manage" onclick="openSettingsPage('roles')"><span class="itile" style="--c:var(--c-indigo)"><svg class="i"><use href="#i-person"/></svg></span><span class="row-label">Roles</span><svg class="i chev"><use href="#i-chev"/></svg></button>
+            <button type="button" class="row" data-perm="audit.view" onclick="openSettingsPage('audit')"><span class="itile" style="--c:var(--c-gray)"><svg class="i"><use href="#i-list"/></svg></span><span class="row-label">Activity log</span><svg class="i chev"><use href="#i-chev"/></svg></button>
+            <button type="button" class="row" data-perm="photos.hidden" onclick="openSettingsPage('privacy')"><span class="itile" style="--c:var(--c-slate)"><svg class="i"><use href="#i-lock"/></svg></span><span class="row-label">Hidden album passcode</span><svg class="i chev"><use href="#i-chev"/></svg></button>
+          </div>
+
+          <div class="group-label">System</div>
+          <div class="group">
+            <button type="button" class="row" data-perm="settings.manage" onclick="openSettingsPage('maintenance')"><span class="itile" style="--c:var(--c-yellow)"><svg class="i"><use href="#i-bolt"/></svg></span><span class="row-label">Maintenance</span><svg class="i chev"><use href="#i-chev"/></svg></button>
+            <button type="button" class="row" data-perm="settings.manage" onclick="openSettingsPage('update')"><span class="itile" style="--c:var(--c-gray)"><svg class="i"><use href="#i-update"/></svg></span><span class="row-label">Software update</span><span class="val" id="settingsVersionTag"></span><svg class="i chev"><use href="#i-chev"/></svg></button>
+          </div>
+          <p class="group-foot center" id="settingsFootVersion"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── OVERVIEW ───────────────────────────────────────────────────── -->
+    <div class="spage" data-page="overview" data-title="Overview">
+      <div class="scroller page-scroll">
+        <div class="settings-body">
+          <div id="settingsMetrics"><div class="group-foot">Loading…</div></div>
+          <div class="group" data-perm="photos.delete">
+            <button type="button" class="row" onclick="openRemovedManager()"><span class="itile" style="--c:var(--c-red)"><svg class="i"><use href="#i-trash"/></svg></span><span class="row-label">Recently removed</span><span class="val" id="removedCountTag"></span><svg class="i chev"><use href="#i-chev"/></svg></button>
+          </div>
+          <p class="group-foot">Removed items are hidden everywhere and won't re-import, but the original files are kept. Restore them from Recently removed.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SOURCES & IMPORT ───────────────────────────────────────────── -->
+    <div class="spage" data-page="sources" data-title="Sources &amp; import">
+      <div class="scroller page-scroll">
+        <div class="settings-body">
+          <div class="group-label">Add a source</div>
+          <div class="group pad">
+            <div class="seg" id="protoSeg" role="tablist">
+              <button type="button" class="on" data-proto="smb" onclick="setProto('smb',this)">SMB</button>
+              <button type="button" data-proto="nfs" onclick="setProto('nfs',this)">NFS</button>
+              <button type="button" data-proto="local" onclick="setProto('local',this)">Folder</button>
+            </div>
+            <div id="proto-smb" class="form-grid">
+              <label class="field"><span>Host / IP</span><input type="text" id="smbHost" placeholder="192.168.1.50" autocomplete="off"></label>
+              <label class="field"><span>Share name</span><input type="text" id="smbShare" placeholder="Photos" autocomplete="off"></label>
+              <label class="field"><span>Username <em>optional</em></span><input type="text" id="smbUser" placeholder="guest" autocomplete="off"></label>
+              <label class="field"><span>Password <em>optional</em></span><input type="password" id="smbPass" autocomplete="off"></label>
+              <label class="field"><span>Domain <em>optional</em></span><input type="text" id="smbDomain" placeholder="WORKGROUP" autocomplete="off"></label>
+            </div>
+            <div id="proto-nfs" class="form-grid" hidden>
+              <label class="field"><span>Host / IP</span><input type="text" id="nfsHost" placeholder="192.168.1.50" autocomplete="off"></label>
+              <label class="field"><span>Export path</span><input type="text" id="nfsExport" placeholder="/export/photos" autocomplete="off"></label>
+            </div>
+            <div id="proto-local" class="form-grid" hidden>
+              <label class="field wide"><span>Server-local path</span><input type="text" id="localPath" placeholder="/mnt/photos" autocomplete="off"></label>
+            </div>
+            <div class="btn-row">
+              <button type="button" class="btn" id="mountBtn" onclick="doMount()">Connect</button>
+              <span class="action-status" id="mountStatus"></span>
+            </div>
+          </div>
+          <p class="group-foot">Aurora mounts shares read-only. Connected shares are re-mounted after a reboot (credentials live in a root-only file, never in the database), and re-connecting a share you imported before re-links your existing photos.</p>
+
+          <div id="connectedSharesCard" hidden>
+            <div class="group-label">Connected shares</div>
+            <div class="group" id="connectedSharesList"></div>
+            <p class="group-foot">Tap a share to scan it or to disconnect it.</p>
+          </div>
+
+          <div id="mountedSourceCard" hidden>
+            <div class="group-label">Scan &amp; index</div>
+            <div class="group pad">
+              <div class="source-path"><svg class="i"><use href="#i-folder"/></svg><span id="mountedPathDisplay">—</span><button type="button" class="link-btn" onclick="clearMount()">Clear</button></div>
+              <button type="button" class="btn wide" id="importBtn" onclick="startImport()">Scan &amp; index</button>
+            </div>
+            <p class="group-foot">Reads photo and video metadata and builds the searchable library. Thumbnails are made as you browse.</p>
+          </div>
+
+          <div id="importProgress" hidden>
+            <div class="group-label">Indexing</div>
+            <div class="group pad">
+              <div class="kpis">
+                <div class="kpi"><b id="kpiScanned">0</b><span>Scanned</span></div>
+                <div class="kpi"><b id="kpiIndexed">0</b><span>Indexed</span></div>
+                <div class="kpi"><b id="kpiSkipped">0</b><span>Skipped</span></div>
+                <div class="kpi"><b id="kpiErrors">0</b><span>Errors</span></div>
+              </div>
+              <div class="progress"><div class="progress-bar" id="progressBar" style="width:0%"></div></div>
+              <div class="stages">
+                <div class="stage" id="stageScanning"><span class="stage-name">Scanning files</span><span class="stage-status" id="stageScanningStatus">Waiting</span></div>
+                <div class="stage" id="stageIndexing"><span class="stage-name">Reading metadata</span><span class="stage-status" id="stageIndexingStatus">Waiting</span></div>
+                <div class="stage" id="stageThumbs"><span class="stage-name">Thumbnails</span><span class="stage-status" id="stageThumbsStatus">Made while browsing</span></div>
+                <div class="stage" id="stageGeo"><span class="stage-name">Place names</span><span class="stage-status" id="stageGeoStatus">During indexing</span></div>
+              </div>
+              <div class="log-feed" id="logFeed"></div>
+            </div>
+          </div>
+
+          <div class="group-label">Re-index metadata</div>
+          <div class="group" id="reindexSources"></div>
+          <p class="group-foot">Re-reads EXIF for an already-imported source, for example after an upgrade. Mount the share first.</p>
+
+          <div class="group-label">Recent imports</div>
+          <div class="group" id="settingsImports"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── DISPLAY ────────────────────────────────────────────────────── -->
+    <div class="spage" data-page="display" data-title="Display">
+      <div class="scroller page-scroll">
+        <div class="settings-body">
+          <div class="group">
+            <label class="row">
+              <span class="row-label">Hide RAW photos</span>
+              <input type="checkbox" class="switch" id="toggleHideRaw" onchange="setHideRaw(this.checked)">
+            </label>
+          </div>
+          <p class="group-foot">RAW files (.cr2, .nef, .arw, .dng) can't be previewed in a browser. This setting applies to this device.</p>
+          <div class="group">
+            <label class="row">
+              <span class="row-label">Reduce transparency</span>
+              <input type="checkbox" class="switch" id="toggleNoBlur" onchange="setNoBlur(this.checked)">
+            </label>
+          </div>
+          <p class="group-foot">Uses solid bars instead of frosted glass. Try this if scrolling feels slow on an older device.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── TAGS ───────────────────────────────────────────────────────── -->
+    <div class="spage" data-page="tags" data-title="Tags">
+      <div class="scroller page-scroll">
+        <div class="settings-body">
+          <div class="group" id="tagManager"><div class="row muted">Loading…</div></div>
+          <p class="group-foot">Tap a tag to rename or delete it. Renaming onto an existing tag merges the two. To tag many photos at once, use Select in the Library.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── PHOTO DESCRIPTIONS (captions) ──────────────────────────────── -->
+    <div class="spage" data-page="captions" data-title="Photo descriptions">
+      <div class="scroller page-scroll">
+        <div class="settings-body">
+          <div class="group pad">
+            <p class="card-text">Describes each photo with a vision AI model on your <b>Ollama</b> server so you can search in plain English, like <b>“girl holding a coffee”</b> or <b>“dog on a beach”</b>. Progress is saved, so it resumes after a stop or restart.</p>
+            <div class="btn-row">
+              <button type="button" class="btn" id="capStartBtn" onclick="capStart(this)">Start</button>
+              <button type="button" class="btn gray" id="capStopBtn" onclick="capStop(this)" hidden>Stop</button>
+              <span class="action-status" id="capStatus"></span>
+            </div>
+            <div id="capProgress" hidden>
+              <div class="progress"><div class="progress-bar" id="capProgressBar" style="width:0%"></div></div>
+              <div class="progress-label" id="capProgressLabel">—</div>
+            </div>
+          </div>
+
+          <div id="capMonitor" hidden>
+            <div class="group-label">Latest</div>
+            <div class="group pad">
+              <div class="cap-last">
+                <img id="capLastThumb" class="cap-last-thumb" alt="">
+                <div class="cap-last-text">
+                  <div class="cap-last-cap" id="capLastCap"></div>
+                  <div class="cap-last-meta" id="capLastMeta"></div>
+                </div>
+              </div>
+            </div>
+            <div class="group-label">Recent activity</div>
+            <div class="group" id="capLog"></div>
+          </div>
+
+          <div class="group-label">Model &amp; server</div>
+          <div class="group pad" id="capSettings">
+            <div class="form-grid">
+              <label class="field wide"><span>Ollama server</span><input type="text" id="capUrl" placeholder="http://localhost:11434" autocomplete="off" spellcheck="false"></label>
+              <label class="field wide"><span>Model</span>
+                <span class="field-inline"><select id="capModel"></select><button type="button" class="btn gray small" id="capTestBtn" onclick="capTestConnection(this)">Test</button></span>
+                <small id="capModelHint"></small>
+              </label>
+              <label class="field"><span>Description style</span><select id="capStyle"></select></label>
+              <label class="field"><span>Parallel requests</span>
+                <select id="capConc">
+                  <option value="1">1 (gentlest)</option><option value="2">2</option><option value="3">3</option><option value="4">4 (fastest)</option>
+                </select>
+              </label>
+            </div>
+            <div class="btn-row">
+              <button type="button" class="btn" id="capSaveBtn" onclick="capSaveConfig(this)">Save</button>
+              <span class="action-status" id="capSaveStatus"></span>
+            </div>
+          </div>
+          <p class="group-foot">Changes apply the next time descriptions start. Use a vision model such as <code>qwen2.5vl:3b</code>; text-only models can't read images.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── DUPLICATES ─────────────────────────────────────────────────── -->
+    <div class="spage" data-page="duplicates" data-title="Duplicates">
+      <div class="scroller page-scroll">
+        <div class="settings-body">
+          <div class="group-label">Exact copies</div>
+          <div class="group pad">
+            <p class="card-text">Finds files with identical content under any name or folder. Copies are hidden from the library and never deleted.</p>
+            <div class="radio-list">
+              <label class="radio"><input type="radio" name="dupMode" id="dupModeAuto" value="auto" checked><span><b>Automatic</b> · keep the largest file, hide the rest</span></label>
+              <label class="radio"><input type="radio" name="dupMode" id="dupModeManual" value="manual"><span><b>Review</b> · choose which copy to keep</span></label>
+            </div>
+            <div class="btn-row">
+              <button type="button" class="btn" id="dupScanBtn" data-perm="settings.manage" onclick="startDupScan()">Scan for duplicates</button>
+              <span class="action-status" id="dupScanStatus"></span>
+            </div>
+            <div id="dupProgress" hidden>
+              <div class="progress"><div class="progress-bar" id="dupProgressBar" style="width:0%"></div></div>
+              <div class="progress-label" id="dupProgressLabel">—</div>
+            </div>
+          </div>
+
+          <div class="group-label">Re-encoded &amp; Live Photo copies</div>
+          <div class="group pad">
+            <p class="card-text">Finds the same photo saved twice at different compression, which the exact scan misses. Matches on capture time, camera, size and file name. The copy with Live Photo motion is always kept.</p>
+            <div class="btn-row">
+              <button type="button" class="btn" id="dupSimilarBtn" data-perm="settings.manage" onclick="startSimilarScan()">Find re-encoded copies</button>
+              <span class="action-status" id="dupSimilarStatus"></span>
+            </div>
+          </div>
+
+          <div id="dupGroupsCard" hidden>
+            <div class="group-label">Duplicate groups</div>
+            <p class="group-foot top">Tap <b>Keep</b> under the copy you want. The others are hidden from your library.</p>
+            <div id="dupGroups"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── USERS ──────────────────────────────────────────────────────── -->
+    <div class="spage" data-page="users" data-title="Users">
+      <div class="scroller page-scroll">
+        <div class="settings-body">
+          <div class="group" id="usersList"><div class="row muted">Loading…</div></div>
+          <div class="group">
+            <button type="button" class="row accent-text" onclick="openUserAddDialog()"><svg class="i"><use href="#i-plus"/></svg><span class="row-label">Add user</span></button>
+          </div>
+          <p class="group-foot">Each person signs in with a username and a 4-digit PIN. Their role decides what they can do.</p>
+        </div>
+      </div>
+    </div>
+    <div class="spage" data-page="user" data-title="User">
+      <div class="scroller page-scroll">
+        <div class="settings-body" id="userDetail"></div>
+      </div>
+    </div>
+
+    <!-- ── ROLES ──────────────────────────────────────────────────────── -->
+    <div class="spage" data-page="roles" data-title="Roles">
+      <div class="scroller page-scroll">
+        <div class="settings-body">
+          <div class="group" id="rolesList"><div class="row muted">Loading…</div></div>
+          <div class="group">
+            <button type="button" class="row accent-text" onclick="openRoleDialog()"><svg class="i"><use href="#i-plus"/></svg><span class="row-label">New role</span></button>
+          </div>
+          <p class="group-foot">The built-in admin and user roles cover most needs. Custom roles pick exactly which permissions apply.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── ACTIVITY LOG ───────────────────────────────────────────────── -->
+    <div class="spage" data-page="audit" data-title="Activity log">
+      <div class="scroller page-scroll">
+        <div class="settings-body">
+          <div class="chip-row wrap" id="auditFilterBar">
+            <button type="button" class="chip on" data-cat="" onclick="setAuditFilter(this)">All</button>
+            <button type="button" class="chip" data-cat="auth" onclick="setAuditFilter(this)">Sign-in</button>
+            <button type="button" class="chip" data-cat="photo" onclick="setAuditFilter(this)">Photos</button>
+            <button type="button" class="chip" data-cat="album" onclick="setAuditFilter(this)">Albums</button>
+            <button type="button" class="chip" data-cat="import" onclick="setAuditFilter(this)">Imports</button>
+            <button type="button" class="chip" data-cat="admin" onclick="setAuditFilter(this)">Users &amp; roles</button>
+          </div>
+          <div class="group" id="auditList"><div class="row muted">Loading…</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── PRIVACY (hidden album passcode) ────────────────────────────── -->
+    <div class="spage" data-page="privacy" data-title="Hidden album">
+      <div class="scroller page-scroll">
+        <div class="settings-body">
+          <div class="group-label">Change passcode</div>
+          <div class="group pad">
+            <div class="form-grid">
+              <label class="field"><span>New passcode</span><input type="password" id="newPasscode" placeholder="0000" maxlength="20" inputmode="numeric" autocomplete="new-password"></label>
+              <label class="field"><span>Confirm</span><input type="password" id="confirmPasscode" placeholder="0000" maxlength="20" inputmode="numeric" autocomplete="new-password"></label>
+            </div>
+            <div class="btn-row">
+              <button type="button" class="btn" onclick="changePasscode()">Set passcode</button>
+              <span class="action-status" id="passcodeSetStatus"></span>
+            </div>
+          </div>
+          <p class="group-foot">The passcode protects the Hidden album in Collections. The default is 0000.</p>
+          <div class="group" id="privacyStats"><div class="row muted">Loading…</div></div>
+          <p class="group-foot">Hidden photos never appear in the Library, Search or Places. They're never deleted.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── MAINTENANCE ────────────────────────────────────────────────── -->
+    <div class="spage" data-page="maintenance" data-title="Maintenance">
+      <div class="scroller page-scroll">
+        <div class="settings-body">
+          <div class="group">
+            <button type="button" class="row" id="btnWarm" onclick="settingsWarm(this)"><span class="itile" style="--c:var(--c-orange)"><svg class="i"><use href="#i-photo"/></svg></span><span class="row-label">Warm thumbnails</span></button>
+            <button type="button" class="row danger" id="btnWarmStop" onclick="settingsWarmStop(this)" hidden><span class="itile" style="--c:var(--c-red)"><svg class="i"><use href="#i-x"/></svg></span><span class="row-label">Stop warming</span></button>
+            <label class="row">
+              <span class="itile" style="--c:var(--c-gray)"><svg class="i"><use href="#i-refresh"/></svg></span>
+              <span class="row-label">Warm after each restart</span>
+              <input type="checkbox" class="switch" id="warmOnBootChk" checked onchange="settingsWarmBootPref(this)">
+            </label>
+          </div>
+          <p class="group-foot" id="warmProgressLine" hidden></p>
+          <p class="group-foot">Warming makes previews ahead of time so browsing is instant. Stopping is safe; it resumes where it left off.</p>
+          <div class="group">
+            <button type="button" class="row" id="btnRelink" onclick="settingsRelink(this)"><span class="itile" style="--c:var(--c-yellow)"><svg class="i"><use href="#i-live"/></svg></span><span class="row-label">Re-link Live Photos</span></button>
+            <button type="button" class="row" id="btnGeocode" onclick="settingsGeocode(this)"><span class="itile" style="--c:var(--c-green)"><svg class="i"><use href="#i-places"/></svg></span><span class="row-label">Name places on the map</span></button>
+          </div>
+          <p class="group-foot">Re-link pairs Live Photo stills with their motion clips. Naming uses the offline cities dataset.</p>
+          <p class="group-foot status" id="settingsActionStatus"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SOFTWARE UPDATE ────────────────────────────────────────────── -->
+    <div class="spage" data-page="update" data-title="Software update">
+      <div class="scroller page-scroll">
+        <div class="settings-body">
+          <div class="group pad update-card">
+            <div class="update-version" id="updateVersionLine">Loading version…</div>
+            <div class="update-summary" id="updateSummary">
+              <div class="update-status-line" id="updateCheckStatus">Checking for updates…</div>
+            </div>
+            <div class="btn-row">
+              <button type="button" class="btn" id="updateApplyBtn" hidden onclick="applyGitHubUpdate()">Update now</button>
+              <button type="button" class="btn gray" id="updateCheckBtn" onclick="checkForUpdates()">Check again</button>
+              <a class="btn plain" id="updateReleaseLink" href="#" target="_blank" rel="noopener" hidden>Release notes</a>
+            </div>
+            <details class="update-changelog" id="updateChangelogWrap" hidden>
+              <summary>What's new</summary>
+              <div class="changelog-body" id="updateChangelog"></div>
+            </details>
+            <div class="update-status" id="updateStatus"></div>
+          </div>
+          <p class="group-foot">Aurora checks GitHub for new releases. Your library, thumbnails, tags, favourites and descriptions live in <code>/var/lib/aurora-photos/</code> and are never touched by an update. A rollback snapshot and database backup are taken first, so a failed update reverts automatically.</p>
+
+          <details class="group pad advanced" id="advancedUpdateCard">
+            <summary>Install from a local zip</summary>
+            <p class="card-text">If the server can't reach GitHub, copy an Aurora update zip onto it and enter the full path. The same rollback safety applies.</p>
+            <div class="update-row">
+              <input type="text" id="updateZipPath" placeholder="/opt/aurora-updates/aurora-photos-update.zip" autocomplete="off" spellcheck="false">
+              <button type="button" class="btn" id="updateApplyLocalBtn" onclick="applyUpdate()">Apply update</button>
+            </div>
+          </details>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
